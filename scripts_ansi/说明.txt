@@ -1,0 +1,21 @@
+scripts_ansi —— ANSI/GBK 编码脚本副本(供 AutoCAD 2007~2020 使用)
+================================================================
+scripts\ 里的 .lsp 是 UTF-8 with BOM 编码(2021+ 的 AutoCAD 需要);
+2007~2020 的 AutoCAD 按 GBK 解析文件, 加载 UTF-8 版会报
+「错误: 输入中的点位置不正确」。
+
+部署(2007~2020 机器):
+  1. 把整个 CAD 文件夹拷过去;
+  2. 用本目录 4 个 .lsp 覆盖 scripts\ 下同名文件(文件名相同, 直接替换);
+  3. APPLOAD scripts\dt_start.lsp -> DTINSTALL。其余步骤与 README 相同。
+
+2021 及以上版本的 AutoCAD 不要用本目录, 用 scripts\ 里的原版。
+本目录不在 CAD 支持路径上; 每次改版 scripts\ 后用 tools\make_ansi.py 重新生成。
+与原版的唯一内容差异: 个别注释/提示文字里的符号替换(> >、=> =>、O(n^2) O(n^2)、<-> <->)。
+
+已实测: AutoCAD 2007(32位) —— dt_start v2.9 的 GBK 副本 APPLOAD + DTINSTALL
+一次通过, 三个脚本加载正常、顶栏「热流道自动化(R)」菜单挂出。
+2007~2015 的 CAD 没有 TRUSTEDPATHS(2016 才引入), 安装时会打印
+「TRUSTEDPATHS=无(老版本, 跳过)」, 这是正常的, 不影响使用。
+若 DTINSTALL 报「参数类型错误: stringp nil」, 说明用的是 v2.8 或更早的
+dt_start.lsp —— 换成 v2.9(重新生成本目录副本并覆盖)即可。
