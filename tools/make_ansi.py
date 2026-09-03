@@ -25,10 +25,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 SRC = os.path.join(ROOT, 'scripts')
 DST = os.path.join(ROOT, 'scripts_ansi')
-FILES = ['dt_start.lsp', 'offset_runner.lsp', 'slot_runner.lsp', 'jrt_runner.lsp', 'size_runner.lsp']
+FILES = ['dt_start.lsp', 'flb_runner.lsp', 'cx_runner.lsp', 'jrt_runner.lsp', 'wx_runner.lsp']
 
 # 仅注释与个别显示字符串中出现的非 GBK 装饰符号 -> GBK 等价写法(代码区纯 ASCII 不受影响)
-REPL = {'▸': '>', '⇒': '=>', '²': '^2', '↔': '<->'}
+REPL = {'▸': '>', '⇒': '=>', '²': '^2', '↔': '<->', 'ø': '%%c'}
 
 README = """scripts_ansi —— ANSI/GBK 编码脚本副本(供 AutoCAD 2007~2020 使用)
 ================================================================

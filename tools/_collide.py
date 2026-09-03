@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """跨文件同名函数冲突分析: 提取每个 lsp 的 (函数名 -> 规范化函数体哈希),
 找出在多个文件中定义且函数体不一致的名字(后加载覆盖先加载的隐患)。"""
-import re, hashlib
+import re, hashlib, os
 
-FILES = ['offset_runner.lsp', 'slot_runner.lsp', 'jrt_runner.lsp', 'size_runner.lsp', 'dt_start.lsp']  # 2026-08-31 目录分类: 与本工具同移 tools\, 分析对象在 ..\scripts
+FILES = ['flb_runner.lsp', 'cx_runner.lsp', 'jrt_runner.lsp', 'wx_runner.lsp', 'dt_start.lsp']  # 2026-08-31 目录分类: 与本工具同移 tools\, 分析对象在 ..\scripts
+HERE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 
 def extract(path):
+    if not os.path.exists(path) and os.path.exists(os.path.join(HERE, path)):
+        path = os.path.join(HERE, path)
     text = open(path, encoding='utf-8-sig').read()
     lines = text.split('\n')
     defs = {}

@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (slot_runner.lsp)  v10.3
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.3
 
 ;;; v10.3  : 健壮性修复(与 offset v10.6 / jrt v9.14 / dt_start v2.8 同期,
 ;;;          几何行为零变化):
@@ -7,7 +7,7 @@
 ;;;             collect-heads/collect-ends 及各图层收集统一按类型过滤,
 ;;;             小圆角半径递减写入 CX 层的"Rn"标注文字不再使后续延长/
 ;;;             大圆角/封闭步骤对文字对象求端点而崩溃;
-;;;          2) dt:fillet-pair 改名 dt:slot-fillet-pair, 缺省层/缺省半径
+;;;          2) dt:fillet-pair 改名 dt:cx-fillet-pair, 缺省层/缺省半径
 ;;;             回退值改为本脚本的 "CX"/slot 小圆角(原缺省引用主脚本
 ;;;             offset 的层与全局 *dt-fillet-r*, slot 单独加载时潜伏
 ;;;             报错; 同名不同体一律改名隔离, 坑 #46 同款);
@@ -29,8 +29,8 @@
 ;;;          画重复封闭线); 6) 延长收头的存活检查失败时不再整批跳过;
 ;;;          7) ini 默认值配置补中文注释(与 offset/jrt 格式一致); 删除未使用
 ;;;          的 exclude 形参与死局部。
-;;; v10.0  : 参数默认值外置 slot_runner.ini(记事本可改, 弹框即生效, 无需重载);
-;;;          参数记忆 slot_runner_mem.ini(确定参数框时自动保存, 上次值下次自动
+;;; v10.0  : 参数默认值外置 cx_runner.ini(记事本可改, 弹框即生效, 无需重载);
+;;;          参数记忆 cx_runner_mem.ini(确定参数框时自动保存, 上次值下次自动
 ;;;          预填, 跨会话); 恢复默认按钮 = 恢复 ini 里的默认值。文件在脚本目录
 ;;;          (无 dt_start 引导器时 TEMP); 解析只认"键 = 数值"行, 损坏自动回退。
 ;;; 适用   : AutoCAD 2024 (AutoCAD 2007 及以上版本均可)
@@ -39,58 +39,58 @@
 ;;;          (R小, 默认15); 悬空端头沿切线固定延长 slot-extend(默认 50),
 ;;;          与其他壁相交处打断 + 大圆角(R大, 默认30), 仍不相交的端头复原;
 ;;;          暂不做两端封口(v8.13 起约定)。
-;;; 来源   : 自 offset_runner v9.x 的出线槽链独立而来(几何逻辑与 v8.16 起
+;;; 来源   : 自 flb_runner v9.x 的出线槽链独立而来(几何逻辑与 v8.16 起
 ;;;          一脉相承, 零改动), 可与主脚本(分流板)分开单独加载, 同时加载
 ;;;          互不影响(参数表/对话框/dcl 文件/回调函数均已改名隔离)。
 ;;; 图层   : "CX" = 出线槽(源线 + 通道壁同层, 蓝色 5); 源线由用户绘制,
 ;;;          脚本不删。v9.1 起图层名由中文"出线槽"改为拼音缩写 "CX"。
-;;; 加载   : APPLOAD 选择本文件加载(slot_runner.dcl 由脚本自动生成)。
+;;; 加载   : APPLOAD 选择本文件加载(cx_runner.dcl 由脚本自动生成)。
 ;;; 命令   : SLOT      —— 弹出参数框, 确定后执行出线槽全流程(取消中止)
 ;;;          SLOTPARAM —— 只弹出参数框改参数, 不执行
 ;;; 已知限制: 与主脚本一致(多段线重建丢凸度/闭合多段线跳过等, 见 AGENTS_CAD.md)。
 ;;; 说明   : 本文件必须 UTF-8 with BOM 编码(中文注释); 自动生成的
-;;;          slot_runner.dcl 为 ANSI/GBK(系统代码页)。
+;;;          cx_runner.dcl 为 ANSI/GBK(系统代码页)。
 ;;; ============================================================================
 
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; ============================================================================
-;; 出线槽参数 —— 由 dt:slot-param-table 驱动(默认值/预填/应用/恢复默认),
-;; 与主脚本 offset_runner 的参数表相互独立, 两脚本同时加载互不影响。
+;; 出线槽参数 —— 由 dt:cx-param-table 驱动(默认值/预填/应用/恢复默认),
+;; 与主脚本 flb_runner 的参数表相互独立, 两脚本同时加载互不影响。
 ;; ============================================================================
-(setq dt:slot-param-table
+(setq dt:cx-param-table
       (list
-        (list "slot_dist" '*dt-slot-dist* 17.5) ; 出线槽偏移距离
-        (list "slot_extend" '*dt-slot-extend* 50.0) ; 悬空端头固定延长距离
-        (list "slot_fillet_r_small" '*dt-slot-fillet-r-small* 15.0) ; 相交断口小圆角半径
-        (list "slot_fillet_r_large" '*dt-slot-fillet-r-large* 30.0))) ; 延长交会处大圆角半径
-(foreach p dt:slot-param-table (set (cadr p) (caddr p)))
+        (list "cx_dist" '*dt-cx-dist* 17.5) ; 出线槽偏移距离
+        (list "cx_extend" '*dt-cx-extend* 50.0) ; 悬空端头固定延长距离
+        (list "cx_fillet_r_small" '*dt-cx-fillet-r-small* 15.0) ; 相交断口小圆角半径
+        (list "cx_fillet_r_large" '*dt-cx-fillet-r-large* 30.0))) ; 延长交会处大圆角半径
+(foreach p dt:cx-param-table (set (cadr p) (caddr p)))
 
 ;; 参数键 → 中文标签(v10.1: 与 offset/jrt 对齐 —— 生成 ini 时写中文注释行)
-(setq dt:slot-param-labels
-      '(("slot_dist"            . "出线槽偏移:")
-        ("slot_extend"          . "出线槽延长:")
-        ("slot_fillet_r_small"  . "出线槽小圆角R:")
-        ("slot_fillet_r_large"  . "出线槽大圆角R:")))
+(setq dt:cx-param-labels
+      '(("cx_dist"            . "出线槽偏移:")
+        ("cx_extend"          . "出线槽延长:")
+        ("cx_fillet_r_small"  . "出线槽小圆角R:")
+        ("cx_fillet_r_large"  . "出线槽大圆角R:")))
 
 ;; ============================================================================
-;; 参数配置与记忆(v10.0): 默认值外置 slot_runner.ini(用户记事本可改, 弹框前
-;; 重读=随时生效); 上次值记忆 slot_runner_mem.ini(确定对话框时自动保存,
+;; 参数配置与记忆(v10.0): 默认值外置 cx_runner.ini(用户记事本可改, 弹框前
+;; 重读=随时生效); 上次值记忆 cx_runner_mem.ini(确定对话框时自动保存,
 ;; 下次打开自动预填)。解析只认"键 = 数值"行, 注释/空行/未知键跳过;
 ;; 全程 vl-catch-all 保护, 文件缺失/损坏静默回退代码内置默认。
-;; 命名带 dt:slot- 前缀与 offset/jrt 同名库隔离(坑 #46); boot 在文件尾调用。
+;; 命名带 dt:cx- 前缀与 offset/jrt 同名库隔离(坑 #46); boot 在文件尾调用。
 ;; ============================================================================
-(setq *dt-slot-cfg* nil   ; 配置(默认值) ((节 (键 . 值)...) ...)
-      *dt-slot-mem* nil)  ; 记忆(上次值)   同结构, 固定节 "参数"
+(setq *dt-cx-cfg* nil   ; 配置(默认值) ((节 (键 . 值)...) ...)
+      *dt-cx-mem* nil)  ; 记忆(上次值)   同结构, 固定节 "参数"
 
 ;; 配置/记忆文件目录: 优先 dt_start 注入的脚本目录, 无则 TEMP(与 find-dcl 同规则)
-(defun dt:slot-cfg-dir ( / )
+(defun dt:cx-cfg-dir ( / )
   (if (and *dt-script-dir* (/= *dt-script-dir* ""))
     *dt-script-dir*
     (getenv "TEMP")))
 
 ;; 单行 "键 = 数值" → (键 . 值); 无等号/空值/非数值返回 nil(distof 校验, 0 合法)
-(defun dt:slot-cfg-kv (ln / p k vs n)
+(defun dt:cx-cfg-kv (ln / p k vs n)
   (setq p (vl-string-search "=" ln))
   (if p
     (progn
@@ -101,7 +101,7 @@
     nil))
 
 ;; 读 INI → ((节名 (键 . 值)...) ...); 文件不存在/读失败返回 nil
-(defun dt:slot-cfg-read (path / f ln sec ent tmp secs)
+(defun dt:cx-cfg-read (path / f ln sec ent tmp secs)
   (setq secs nil sec nil)
   (vl-catch-all-apply
     '(lambda ( )
@@ -118,7 +118,7 @@
                 ;;   strlen 按字节计而 substr 按字符计, 中文节名(如 "[参数]")
                 ;;   会连带尾部 "]"(变成 "参数]")导致配置节永远匹配不上。
                 (setq sec (vl-string-trim " \t[]" (substr ln 2))))
-               ((setq ent (dt:slot-cfg-kv ln))
+               ((setq ent (dt:cx-cfg-kv ln))
                 (if (and sec (/= sec ""))
                   (progn
                     (setq tmp (vl-remove (assoc (car ent) (cdr (assoc sec secs)))
@@ -135,33 +135,39 @@
   (reverse secs))
 
 ;; 数据 → 指定节的键值表(无该节 nil)
-(defun dt:slot-cfg-sec (data sec / e)
+(defun dt:cx-cfg-sec (data sec / e)
   (if (and data (setq e (assoc sec data))) (cdr e)))
 
 ;; 节内取键值(无该键 nil; 值可为 0, 0 非 nil 仍算"有")
-(defun dt:slot-cfg-get (data sec key)
-  (cdr (assoc key (dt:slot-cfg-sec data sec))))
+(defun dt:cx-cfg-get (data sec key)
+  (cdr (assoc key (dt:cx-cfg-sec data sec))))
 
 ;; 参数默认值: 配置节"参数" → 代码表 caddr
-(defun dt:slot-param-default (key / v)
-  (cond ((setq v (dt:slot-cfg-get *dt-slot-cfg* "参数" key)) v)
-        (T (caddr (assoc key dt:slot-param-table)))))
+(defun dt:cx-param-default (key / v alt)
+  (setq alt (cond ((= key "cx_dist") "slot_dist")
+                  ((= key "cx_extend") "slot_extend")
+                  ((= key "cx_fillet_r_small") "slot_fillet_r_small")
+                  ((= key "cx_fillet_r_large") "slot_fillet_r_large")
+                  (T key)))
+  (cond ((setq v (dt:cx-cfg-get *dt-cx-cfg* "参数" key)) v)
+        ((setq v (dt:cx-cfg-get *dt-cx-cfg* "参数" alt)) v)
+        (T (caddr (assoc key dt:cx-param-table)))))
 
 ;; 首次自动生成配置文件(带中文注释)
-(defun dt:slot-cfg-gen (path / f p lbl)
+(defun dt:cx-cfg-gen (path / f p lbl)
   (vl-catch-all-apply
     '(lambda ( )
        (setq f (open path "w"))
        (if f
          (progn
-           (write-line "; slot_runner 参数默认值配置(首次运行自动生成, 记事本可改)" f)
+           (write-line "; cx_runner 参数默认值配置(首次运行自动生成, 记事本可改)" f)
            (write-line "; 改数值保存后, 下次打开参数窗口即生效(无需重载脚本/重启CAD)" f)
            (write-line "; 恢复默认按钮 = 本文件的值; 删除本文件 = 回代码内置默认" f)
-           (write-line "; 上次填的值在 slot_runner_mem.ini(程序自动维护, 一般不用管)" f)
+           (write-line "; 上次填的值在 cx_runner_mem.ini(程序自动维护, 一般不用管)" f)
            (write-line "" f)
            (write-line "[参数]" f)
-           (foreach p dt:slot-param-table
-             (setq lbl (cdr (assoc (car p) dt:slot-param-labels)))
+           (foreach p dt:cx-param-table
+             (setq lbl (cdr (assoc (car p) dt:cx-param-labels)))
              (if lbl (write-line (strcat "; " lbl) f))
              (write-line (strcat (car p) " = " (rtos (caddr p) 2 4)) f))
            (close f)
@@ -171,21 +177,21 @@
   T)
 
 ;; 确定参数框后保存上次值(供下次打开预填)
-(defun dt:slot-mem-save ( / path f p)
-  (setq *dt-slot-mem*
+(defun dt:cx-mem-save ( / path f p)
+  (setq *dt-cx-mem*
         (list (cons "参数"
                     (mapcar '(lambda (q) (cons (car q) (eval (cadr q))))
-                            dt:slot-param-table)))
-        path (strcat (dt:slot-cfg-dir) "\\slot_runner_mem.ini"))
+                            dt:cx-param-table)))
+        path (strcat (dt:cx-cfg-dir) "\\cx_runner_mem.ini"))
   (vl-catch-all-apply
     '(lambda ( )
        (setq f (open path "w"))
        (if f
          (progn
-           (write-line "; slot_runner 参数记忆(确定参数窗口时自动更新, 可删除)" f)
+           (write-line "; cx_runner 参数记忆(确定参数窗口时自动更新, 可删除)" f)
            (write-line "" f)
            (write-line "[参数]" f)
-           (foreach p dt:slot-param-table
+           (foreach p dt:cx-param-table
              (write-line (strcat (car p) " = " (rtos (eval (cadr p)) 2 4)) f))
            (close f)
            (setq f nil))))
@@ -194,25 +200,25 @@
   (princ))
 
 ;; 加载末尾调用: 生成缺失配置 + 把上次值恢复进全局变量(预填即上次状态)
-(defun dt:slot-cfg-boot ( / path kv row)
+(defun dt:cx-cfg-boot ( / path kv row)
   (vl-catch-all-apply
     '(lambda ( )
-       (setq path (strcat (dt:slot-cfg-dir) "\\slot_runner.ini"))
-       (setq *dt-slot-cfg* (dt:slot-cfg-read path))
-       (if (null *dt-slot-cfg*)
+       (setq path (strcat (dt:cx-cfg-dir) "\\cx_runner.ini"))
+       (setq *dt-cx-cfg* (dt:cx-cfg-read path))
+       (if (null *dt-cx-cfg*)
          (progn
-           (dt:slot-cfg-gen path)
-           (setq *dt-slot-cfg* (dt:slot-cfg-read path))))
-       (setq *dt-slot-mem*
-             (dt:slot-cfg-read (strcat (dt:slot-cfg-dir) "\\slot_runner_mem.ini")))
-       (foreach kv (dt:slot-cfg-sec *dt-slot-mem* "参数")
-         (setq row (assoc (car kv) dt:slot-param-table))
+           (dt:cx-cfg-gen path)
+           (setq *dt-cx-cfg* (dt:cx-cfg-read path))))
+       (setq *dt-cx-mem*
+             (dt:cx-cfg-read (strcat (dt:cx-cfg-dir) "\\cx_runner_mem.ini")))
+       (foreach kv (dt:cx-cfg-sec *dt-cx-mem* "参数")
+         (setq row (assoc (car kv) dt:cx-param-table))
          (if row (set (cadr row) (cdr kv)))))
     nil)
   (princ))
 
 ;; ============================================================================
-;; 一、工具函数(与主脚本 offset_runner 逐字一致)
+;; 一、工具函数(与主脚本 flb_runner 逐字一致)
 ;; ============================================================================
 ;; 计算两点距离
 (defun dt:dist (p1 p2)
@@ -610,14 +616,14 @@
 
 ;; boundingbox 输出解包: vla-getboundingbox 的输出参数有的版本绑定为
 ;; safearray 本体, 有的为 variant(内含 safearray) —— 统一容忍两种
-;; (v9.8a 修复: variantp 类型错误; 与 offset_runner 逐字一致)
+;; (v9.8a 修复: variantp 类型错误; 与 flb_runner 逐字一致)
 (defun dt:rect-bb-pts (x)
   (if (= (type x) 'variant)
     (vlax-safearray->list (vlax-variant-value x))
     (vlax-safearray->list x)))
 
 ;; 对象列表整体范围: 返回 (minx miny maxx maxy), 全部失败返回 nil
-;; (与 offset_runner 逐字一致; v10.3 供 cross-points 包围盒预过滤用)
+;; (与 flb_runner 逐字一致; v10.3 供 cross-points 包围盒预过滤用)
 (defun dt:rect-bbox (objs / o mn mx p minx miny maxx maxy)
   (foreach o objs
     (setq mn nil mx nil)
@@ -662,12 +668,12 @@
 
 
 ;; ============================================================================
-;; 二、断口圆角(小圆角/大圆角共用 dt:slot-fillet-pair)
+;; 二、断口圆角(小圆角/大圆角共用 dt:cx-fillet-pair)
 ;; ============================================================================
 ;; 处理一个断口对: 计算圆角几何, 递减半径, 方向验证, 修剪两线, 创建圆角弧, 必要时标注
 ;; h1/h2 = (对象 端类型" S"/"E" 端头点 指向主体方向)
 ;; layer = 圆角弧/标注文字所在图层(缺省"CX")
-;; r-start = 圆角起始半径(缺省 slot 小圆角 *dt-slot-fillet-r-small*)
+;; r-start = 圆角起始半径(缺省 slot 小圆角 *dt-cx-fillet-r-small*)
 ;; nochk = T 时跳过圆心区域方向验证(v9.5 大圆角: 延长接头处两源线区域
 ;;         不重叠, 区域检查会误拒正确方向; b1 与小圆角同公式, 方向由
 ;;         两端头的主体方向唯一确定)
@@ -677,12 +683,12 @@
 ;;   会因 *dt-fillet-r* 无绑定报错(隐藏跨脚本耦合)。凡同名不同体一律改名
 ;;   隔离(坑 #46 同款, jrt 侧 dt:jrt-fillet-pair 先例), 缺省值改用本脚本
 ;;   的 "CX"/slot 小圆角。
-(defun dt:slot-fillet-pair (h1 h2 center-lines off-dist layer r-start nochk /
+(defun dt:cx-fillet-pair (h1 h2 center-lines off-dist layer r-start nochk /
                        obj1 et1 p1 d1 obj2 et2 p2 d2
                        ang2 b1 b2 done r d-tan len1 len2 c t1 t2 m a1 a2
                        tmp arc txt txt-pt ms ok)
   (if (null layer) (setq layer "CX"))
-  (if (null r-start) (setq r-start *dt-slot-fillet-r-small*))
+  (if (null r-start) (setq r-start *dt-cx-fillet-r-small*))
   (setq obj1 (car h1) et1 (cadr h1) p1 (caddr h1) d1 (cadddr h1)
         obj2 (car h2) et2 (cadr h2) p2 (caddr h2) d2 (cadddr h2))
   ;; 两切线方向夹角的一半
@@ -831,7 +837,7 @@
   (list ok skip))
 
 ;; ============================================================================
-;; 出线槽流程 —— v8.6 新增, 自 offset_runner 独立(逻辑零改动)
+;; 出线槽流程 —— v8.6 新增, 自 flb_runner 独立(逻辑零改动)
 ;; 需求: "CX"图层上的线向两侧偏移 slot-dist(默认17.5)生成通道壁,
 ;;       源线保留; 相交的裁剪+小圆角, 分离的悬空端头固定延长+相交大圆角。
 ;; 图层: "CX"(源线+通道壁同层, v8.9)
@@ -859,7 +865,7 @@
 ;; 裁剪后交叉处断开, 断口由 slot-fillet-all 圆角连接。
 ;; v8.14: 加 exclude 参数(源线 eName 字符串列表) —— 源线与通道壁同图层,
 ;;   收集通道壁时必须跳过源线, 防止源线被当作通道壁裁剪(源线未保留)。
-(defun dt:slot-trim (center-lines slot-layer slot-dist exclude / all vla-list
+(defun dt:cx-trim (center-lines slot-layer slot-dist exclude / all vla-list
                      pts-pairs pair trim-count skip-count)
   (if (null center-lines)
     (princ "\n【出线槽】没有源线基准, 无法裁剪。")
@@ -886,18 +892,18 @@
            (princ (strcat "\n【出线槽】裁剪: 处理 " (itoa trim-count)
                           " 条, 跳过 " (itoa skip-count) " 条。"))))))))
 
-;; 出线槽断口圆角: 断口配对 → dt:slot-fillet-pair(center-lines = 出线槽源线,
+;; 出线槽断口圆角: 断口配对 → dt:cx-fillet-pair(center-lines = 出线槽源线,
 ;; slot-dist 做 in-zone 方向验证 —— 与分流板断口圆角完全一致, 圆心必须在
 ;; 源线带状区域外, 弧凸向交叉中心/断口内侧)
 ;; v8.13: 加 exclude 参数(源线对象列表) —— 源线不再移走/删除,
 ;; 与通道壁同图层, 收集端头时必须跳过源线, 防止源线被误配对圆角。
 ;; v8.14: exclude 改为 eName 字符串列表比较 —— 原 vla-object equal 比较
 ;; 对不同实例恒不成立, 排除失效导致源线参与配对(误删相连线)。
-(defun dt:slot-fillet-all (layer r center-lines slot-dist exclude / vla-list
+(defun dt:cx-fillet-all (layer r center-lines slot-dist exclude / vla-list
                            heads pairs pair res count-ok count-fail)
   (if (null layer) (setq layer "CX"))
-  (if (null r) (setq r *dt-slot-fillet-r-small*))
-  (if (null slot-dist) (setq slot-dist *dt-slot-dist*))
+  (if (null r) (setq r *dt-cx-fillet-r-small*))
+  (if (null slot-dist) (setq slot-dist *dt-cx-dist*))
   (setq vla-list (dt:curves-only (dt:layer-vlas layer)))
   (if (null vla-list)
     (princ (strcat "\n【出线槽】\"" layer "\"图层没有线, 跳过圆角。"))
@@ -908,7 +914,7 @@
       (command "_.UNDO" "BE")
       (setq count-ok 0 count-fail 0)
       (foreach pair pairs
-        (setq res (dt:slot-fillet-pair (car pair) (cadr pair) center-lines slot-dist layer r nil))
+        (setq res (dt:cx-fillet-pair (car pair) (cadr pair) center-lines slot-dist layer r nil))
         (if res
           (setq count-ok (1+ count-ok))
           (setq count-fail (1+ count-fail))))
@@ -918,7 +924,7 @@
 
 ;; ============================================================================
 ;; 出线槽固定延长 + 收头 + 大圆角(v9.3 重构):
-;;   悬空端头沿切线**固定延长** *dt-slot-extend*(默认 50);
+;;   悬空端头沿切线**固定延长** *dt-cx-extend*(默认 50);
 ;;   每条延长的壁沿延长方向找**第一个交点**, 把端头**收回交点**
 ;;   (等效 AutoCAD FILLET 自带修剪, 消除 v8.15 版"冲过头"缺陷);
 ;;   未命中的端头复原。
@@ -933,7 +939,7 @@
 ;; 过滤"沿延长方向且不超过延长长度+1"者取离原端头最近的一个;
 ;; 无实际交点时兜底"端头贴壁"(最近距离≤0.5, 沿用 v8.16 双判定容差)。
 ;; 返回 (宿主壁 交点) 或 nil
-(defun dt:slot-first-cross (obj orig newp vla-list exclude /
+(defun dt:cx-first-cross (obj orig newp vla-list exclude /
                             dir len o p pts dp best best-d cp)
   (setq dir (dt:unit (mapcar '- newp orig))
         len (distance orig newp)
@@ -967,14 +973,14 @@
       best)))
 
 ;; 出线槽固定延长(v8.15): 对图层内每条通道壁的悬空端头(端头处无其他端头
-;; 重合), 沿切线向外固定延长 dist(默认 *dt-slot-extend*=50, 用户方案)。
-;; 不找交点, 直接延长固定距离; 收头与圆角交给 dt:slot-join 处理(v9.3)。
+;; 重合), 沿切线向外固定延长 dist(默认 *dt-cx-extend*=50, 用户方案)。
+;; 不找交点, 直接延长固定距离; 收头与圆角交给 dt:cx-join 处理(v9.3)。
 ;; 方向: S 端 -sd(指向起点外侧), E 端原始切向(指向终点外侧)。
 ;; 返回: ((obj 端类型" S"/"E" 原端头 新端头) ...)
-(defun dt:slot-extend-fixed (layer dist exclude / vla-list ends obj sp ep sd ed
+(defun dt:cx-extend-fixed (layer dist exclude / vla-list ends obj sp ep sd ed
                              h newp ret)
   (if (null layer) (setq layer "CX"))
-  (if (null dist) (setq dist *dt-slot-extend*))
+  (if (null dist) (setq dist *dt-cx-extend*))
   (setq vla-list (dt:curves-only (dt:layer-vlas layer)))
   (if (null vla-list)
     (princ "\n【出线槽】没有通道线, 跳过延长。")
@@ -1012,18 +1018,18 @@
 ;;          修剪, 修复"冲过头"缺陷); 未命中 → 复原到原端头。
 ;;   Pass2: 逐交点圆角(同一交点多条记录只处理一次; 端头实时重收集,
 ;;          避免前一个圆角移动端头后用到旧数据, 坑#23):
-;;            重合端头≥2(转角相接) → 与小圆角完全同一套 dt:slot-fillet-pair,
+;;            重合端头≥2(转角相接) → 与小圆角完全同一套 dt:cx-fillet-pair,
 ;;              仅半径为 R大(v9.5: nochk=T 关闭圆心区域方向验证 ——
 ;;              延长接头处两源线区域不重叠, 该验证会误拒正确方向,
 ;;              这就是 v9.3/v9.4 方向错误的根源);
 ;;            仅1个(T形相接) → 交点处打断宿主壁产生重合断头, 取与
 ;;              宿主源线前进方向同侧的断头, 同一套 fillet-pair 配对。
-(defun dt:slot-join (layer r center-lines slot-dist exclude ext-rec /
+(defun dt:cx-join (layer r center-lines slot-dist exclude ext-rec /
                      vla-list rec obj et orig newp hit ep hits misses
                      cp host done-cps heads h res count-ok count-fail
                      i j h1 h2 fwd hh pick)
   (if (null layer) (setq layer "CX"))
-  (if (null r) (setq r *dt-slot-fillet-r-large*))
+  (if (null r) (setq r *dt-cx-fillet-r-large*))
   (setq vla-list (dt:curves-only (dt:layer-vlas layer)))
   (if (null vla-list)
     (princ "\n【出线槽】没有通道线, 跳过延长收头。")
@@ -1040,7 +1046,7 @@
         (if (and (not (vl-catch-all-error-p ep)) ep)
           (princ "\n【出线槽】延长记录对象已失效, 跳过该记录。")
           (progn
-            (setq hit (dt:slot-first-cross obj orig newp vla-list exclude))
+            (setq hit (dt:cx-first-cross obj orig newp vla-list exclude))
             (if hit
               (setq hits (cons (list obj et (cadr hit) (car hit)) hits))
               (setq misses (cons (list obj et orig) misses))))))
@@ -1080,7 +1086,7 @@
                      (if (and (not (equal (car h1) (car h2)))
                               (dt:not-parallel (cadddr h1) (cadddr h2)))
                        (progn
-                         (setq res (dt:slot-fillet-pair h1 h2 center-lines slot-dist
+                         (setq res (dt:cx-fillet-pair h1 h2 center-lines slot-dist
                                                    layer r T))
                          (if res
                            (setq count-ok (1+ count-ok))
@@ -1112,7 +1118,7 @@
                        (setq pick h)))
                    (if pick
                      (progn
-                       (setq res (dt:slot-fillet-pair h1 pick center-lines slot-dist
+                       (setq res (dt:cx-fillet-pair h1 pick center-lines slot-dist
                                                  layer r T))
                        (if res
                          (setq count-ok (1+ count-ok))
@@ -1152,13 +1158,13 @@
 ;; v9.6 误用圆角的 (对象 端类型 坐标 方向)格式, dt:end-free 把圆弧对象
 ;; 当点用导致崩溃。参与了接头的壁端头已被延长/收头/圆角移动(距源线端点
 ;; ≥22, 实测), 不满足距离条件, 自然不会被误封。
-;; v9.9: 收尾调 dt:slot-cxk —— 距 DP(垫片)层对象最远的一条封闭线移入
+;; v9.9: 收尾调 dt:cx-cxk —— 距 DP(垫片)层对象最远的一条封闭线移入
 ;; "CXK"图层(蓝色 5, 与 CX 同色, 供下游区分出线口)。
-(defun dt:slot-close (layer center-lines slot-dist /
+(defun dt:cx-close (layer center-lines slot-dist /
                       ends P cand e a pair p1 p2 done-pairs ln count tol closers
                       cl)
   (if (null layer) (setq layer "CX"))
-  (if (null slot-dist) (setq slot-dist *dt-slot-dist*))
+  (if (null slot-dist) (setq slot-dist *dt-cx-dist*))
   (setq tol (max 1.0 (* slot-dist 0.15))
         ends (dt:collect-ends (dt:layer-vlas layer))
         done-pairs nil
@@ -1213,7 +1219,7 @@
       (princ (strcat "\n【出线槽】封闭: 共封闭 " (itoa count)
                      " 处通道敞口(封闭线已放\"" layer "\"图层)。"))
       ;; v9.9: 距 DP(垫片)层对象最远的一条封闭线移入 CXK 图层(同一 UNDO 组内)
-      (dt:slot-cxk closers)
+      (dt:cx-cxk closers)
       (command "_.UNDO" "E")))
   (princ))
 
@@ -1222,7 +1228,7 @@
 ;; (起点/中点/终点)到各 DP 对象最近点的最小值(几何边缘距离, 圆/线/弧
 ;; 通用)。DP 层不存在或为空 → 提示并跳过(全部封闭线留在 CX, SLOT 可
 ;; 独立运行); 只有 1 条封闭线时规则照常成立(它即最远, 仍移入)。
-(defun dt:slot-cxk (closers / ss dps ln sp mp ep dpo q cp dmin best best-d
+(defun dt:cx-cxk (closers / ss dps ln sp mp ep dpo q cp dmin best best-d
                     layers lay)
   (cond
     ((null closers)
@@ -1267,15 +1273,15 @@
 ;; → 删除源线。
 ;; 关键(v8.10 用户确认 + v9.3/v9.5/v9.6 用户要求):
 ;;   * 相交的线: 裁剪(伸进对方源线区域内的段删除, 与分流板一致) + 小圆角 R小
-;;   * 未相交的线: 悬空端头**固定延长** *dt-slot-extend*(默认50); 延长后
+;;   * 未相交的线: 悬空端头**固定延长** *dt-cx-extend*(默认50); 延长后
 ;;     沿方向找第一个交点并**收头**(=FILLET 自带修剪); 交点处大圆角
 ;;     R大 —— 与小圆角同一套 fillet-pair(仅半径不同, v9.5)
 ;;   * 大小圆角方向均与分流板一致: 弧凸向交点
 ;;   * v9.6: 通道敞口(源线悬空端)用封闭线封上(放本层); 流程末尾**删除
 ;;     全部源线** —— 重跑 SLOT 需重新绘制源线, 旧通道壁仍需先手动清理。
-(defun dt:slot-process (src-layer slot-layer slot-dist
+(defun dt:cx-process (src-layer slot-layer slot-dist
                         / ss src-enames center-lines res ext-rec n-del r en)
-  (if (null slot-dist) (setq slot-dist *dt-slot-dist*))
+  (if (null slot-dist) (setq slot-dist *dt-cx-dist*))
   (setq ss (ssget "X" (list (cons 8 src-layer))))
   (if (null ss)
     (princ (strcat "\n【出线槽】\"" src-layer "\"图层没有线, 跳过。"))
@@ -1291,22 +1297,22 @@
         (progn
           ;; 1) 区域裁剪: 相交处伸进对方源线区域内的段整段删除(与分流板一致;
           ;;    v8.14 传 src-enames 排除源线, 源线不参与裁剪)
-          (dt:slot-trim center-lines slot-layer slot-dist src-enames)
+          (dt:cx-trim center-lines slot-layer slot-dist src-enames)
           ;; 2) 小圆角: 连接相交断口(圆心在源线区域外, 与分流板断口圆角一致;
           ;;    v8.14 传 src-enames, 源线不参与圆角配对)
-          (dt:slot-fillet-all slot-layer *dt-slot-fillet-r-small* center-lines slot-dist src-enames)
+          (dt:cx-fillet-all slot-layer *dt-cx-fillet-r-small* center-lines slot-dist src-enames)
           ;; 3) 固定延长悬空端头(v8.15): 悬空端头沿切线向外固定延长
-          ;;    *dt-slot-extend*(默认50), 返回 ((obj 端类型 原端头 新端头) ...);
+          ;;    *dt-cx-extend*(默认50), 返回 ((obj 端类型 原端头 新端头) ...);
           ;;    源线不参与延长(eName 排除)
-          (setq ext-rec (dt:slot-extend-fixed slot-layer *dt-slot-extend* src-enames))
+          (setq ext-rec (dt:cx-extend-fixed slot-layer *dt-cx-extend* src-enames))
           ;; 4) 收头 + 大圆角(v9.5): 每条延长的壁沿方向找第一个交点并收头
           ;;    (=FILLET 自带修剪); 交点处与小圆角同一套 fillet-pair,
           ;;    仅半径 R大; 未命中则复原。
-          (dt:slot-join slot-layer *dt-slot-fillet-r-large* center-lines slot-dist src-enames ext-rec)
+          (dt:cx-join slot-layer *dt-cx-fillet-r-large* center-lines slot-dist src-enames ext-rec)
           ;; 5) 通道封闭(v9.6): 每个敞口(源线悬空端的两壁端头, 距源线
           ;;    端点 ≈ slot-dist 的悬空端头对)连一条封闭线(垂直于通道,
           ;;    放本层)。必须在删除源线之前执行(用源线端点定位敞口)。
-          (dt:slot-close slot-layer center-lines slot-dist)
+          (dt:cx-close slot-layer center-lines slot-dist)
           ;; 6) 删除源线(v9.6, 用户要求): 偏移用的源线全部删除, 图面
           ;;    只留通道壁/圆弧/封闭线。注意: 重跑 SLOT 需重新绘制源线;
           ;;    旧通道壁仍需先手动清理(既有约定)。
@@ -1326,25 +1332,25 @@
         (princ "\n【出线槽】偏移失败(无通道壁生成)。")))))
 
 ;; ============================================================================
-;; 参数对话框 —— 与主脚本 offset_runner 的对话框相互独立:
-;; 对话框名 dt_slot_param / dcl 文件 slot_runner.dcl / 回调函数均不同名,
+;; 参数对话框 —— 与主脚本 flb_runner 的对话框相互独立:
+;; 对话框名 dt_cx_param / dcl 文件 cx_runner.dcl / 回调函数均不同名,
 ;; 两脚本同时加载互不覆盖。
 ;; ============================================================================
 
-;; 内置 DCL 源文本(自动生成 slot_runner.dcl, 保证界面 100% 可用)
-(defun dt:slot-dcl-lines ( / )
+;; 内置 DCL 源文本(自动生成 cx_runner.dcl, 保证界面 100% 可用)
+(defun dt:cx-dcl-lines ( / )
   (list
-    "dt_slot_param : dialog {"
+    "dt_cx_param : dialog {"
     "  label = \"出线槽参数设置\";"
     "  : boxed_column {"
     "    label = \"基本设置\";"
     "    : row {"
-    "      : edit_box { key = \"slot_dist\"; label = \"出线槽偏移:\"; edit_width = 10; }"
-    "      : edit_box { key = \"slot_extend\"; label = \"出线槽延长:\"; edit_width = 10; }"
+    "      : edit_box { key = \"cx_dist\"; label = \"出线槽偏移:\"; edit_width = 10; }"
+    "      : edit_box { key = \"cx_extend\"; label = \"出线槽延长:\"; edit_width = 10; }"
     "    }"
     "    : row {"
-    "      : edit_box { key = \"slot_fillet_r_small\"; label = \"出线槽小圆角R:\"; edit_width = 10; }"
-    "      : edit_box { key = \"slot_fillet_r_large\"; label = \"出线槽大圆角R:\"; edit_width = 10; }"
+    "      : edit_box { key = \"cx_fillet_r_small\"; label = \"出线槽小圆角R:\"; edit_width = 10; }"
+    "      : edit_box { key = \"cx_fillet_r_large\"; label = \"出线槽大圆角R:\"; edit_width = 10; }"
     "    }"
     "  }"
     "  : row {"
@@ -1356,17 +1362,17 @@
     "}"))
 
 ;; 把内置 DCL 源文本写入文件 path(返回 path; 失败返回 nil)
-;; v9.8: 由 dt:write-dcl 改名 dt:slot-write-dcl —— 与主脚本同名函数体不同
-;; (此处写出本脚本的 dt:slot-dcl-lines 源), 三脚本同加载时同名不同体的
+;; v9.8: 由 dt:write-dcl 改名 dt:cx-write-dcl —— 与主脚本同名函数体不同
+;; (此处写出本脚本的 dt:cx-dcl-lines 源), 三脚本同加载时同名不同体的
 ;; 函数互相覆盖会导致主脚本对话框写错内容(坑#46 同类)
-(defun dt:slot-write-dcl (path / f ln)
+(defun dt:cx-write-dcl (path / f ln)
   (setq f (open path "w"))
   (if f
     (progn
       ;; v10.3: 写中途异常也保证 close(半截 dcl 由对话框链的 catch 提示,
       ;;   不滞留句柄)
       (vl-catch-all-apply
-        '(lambda ( ) (foreach ln (dt:slot-dcl-lines) (write-line ln f)))
+        '(lambda ( ) (foreach ln (dt:cx-dcl-lines) (write-line ln f)))
         nil)
       (close f)
       path)
@@ -1374,11 +1380,11 @@
 
 ;; 查找对话框文件路径: **确定性目录**——优先 dt_start 注入的 *dt-script-dir*,
 ;; 无 dt_start 时写 TEMP。v2.0 重写: 删除 findfile 候选链(多副本环境下会
-;; 命中其它目录的同名旧副本)。总是覆盖生成最新 slot_runner.dcl。
-(defun dt:slot-find-dcl ( / )
+;; 命中其它目录的同名旧副本)。总是覆盖生成最新 cx_runner.dcl。
+(defun dt:cx-find-dcl ( / )
   (if (and *dt-script-dir* (/= *dt-script-dir* ""))
-    (dt:slot-write-dcl (strcat *dt-script-dir* "\\slot_runner.dcl"))
-    (dt:slot-write-dcl (strcat (getenv "TEMP") "\\slot_runner_tmp.dcl"))))
+    (dt:cx-write-dcl (strcat *dt-script-dir* "\\cx_runner.dcl"))
+    (dt:cx-write-dcl (strcat (getenv "TEMP") "\\cx_runner_tmp.dcl"))))
 
 ;; 读取编辑框数值: 空/非法输入时返回默认值 def
 ;; v10.1: atof 对垃圾串静默返回 0(如 "abc" -> 0.0), 参数会被悄悄改成 0;
@@ -1390,26 +1396,26 @@
 
 ;; 恢复默认参数到对话框(恢复默认按钮回调; v10.0 = 恢复 ini 配置的默认值,
 ;; 先重读配置实现"改 ini 后点恢复默认立即生效"; 只刷控件, 确定才生效)
-(defun dt:slot-param-reset ( / p)
-  (setq *dt-slot-cfg* (dt:slot-cfg-read (strcat (dt:slot-cfg-dir) "\\slot_runner.ini")))
-  (foreach p dt:slot-param-table
-    (set_tile (car p) (rtos (dt:slot-param-default (car p)) 2 2))))
+(defun dt:cx-param-reset ( / p)
+  (setq *dt-cx-cfg* (dt:cx-cfg-read (strcat (dt:cx-cfg-dir) "\\cx_runner.ini")))
+  (foreach p dt:cx-param-table
+    (set_tile (car p) (rtos (dt:cx-param-default (car p)) 2 2))))
 
 ;; 应用对话框值到全局参数(确定按钮回调; 空/非法输入回退当前值);
 ;; v10.0: 应用后自动保存记忆(取消不会触发本回调, 天然"确定才记忆")
-(defun dt:slot-param-apply ( / p v)
-  (foreach p dt:slot-param-table
+(defun dt:cx-param-apply ( / p v)
+  (foreach p dt:cx-param-table
     (setq v (dt:get-num (car p) (eval (cadr p))))
     ;; v10.3: 负值校验 —— 距离/半径类参数 <0 回退当前值(负值会画出退化几何)
     (if (< v 0.0) (setq v (eval (cadr p))))
     (set (cadr p) v))
-  (dt:slot-mem-save))
+  (dt:cx-mem-save))
 
 ;; 弹出出线槽参数对话框
 ;; 返回: T=用户点"确定"(参数已应用到全局变量), nil=取消/加载失败
-(defun dt:slot-param-dialog ( / dcl-file dcl-id result p)
-  (setq *dt-slot-cfg* (dt:slot-cfg-read (strcat (dt:slot-cfg-dir) "\\slot_runner.ini")))
-  (setq dcl-file (dt:slot-find-dcl))
+(defun dt:cx-param-dialog ( / dcl-file dcl-id result p)
+  (setq *dt-cx-cfg* (dt:cx-cfg-read (strcat (dt:cx-cfg-dir) "\\cx_runner.ini")))
+  (setq dcl-file (dt:cx-find-dcl))
   (if (null dcl-file)
     (progn
       (princ "\n【界面】无法生成对话框文件(磁盘权限不足?), 界面不可用。")
@@ -1423,14 +1429,14 @@
           (princ "\n【界面】对话框文件加载失败。")
           nil)
         (progn
-          (if (new_dialog "dt_slot_param" dcl-id)
+          (if (new_dialog "dt_cx_param" dcl-id)
             (progn
               ;; 预填当前参数值
-              (foreach p dt:slot-param-table
+              (foreach p dt:cx-param-table
                 (set_tile (car p) (rtos (eval (cadr p)) 2 2)))
               ;; 控件回调
-              (action_tile "reset" "(dt:slot-param-reset)")
-              (action_tile "accept" "(dt:slot-param-apply)(done_dialog 1)")
+              (action_tile "reset" "(dt:cx-param-reset)")
+              (action_tile "accept" "(dt:cx-param-apply)(done_dialog 1)")
               (action_tile "cancel" "(done_dialog 0)")
               (setq result (vl-catch-all-apply 'start_dialog nil))
               (unload_dialog dcl-id)
@@ -1441,19 +1447,24 @@
               nil)))))))
 
 ;; 命令 SLOTPARAM: 弹出参数设置对话框(只修改参数, 不执行)
-(defun c:SLOTPARAM ( / )
-  (if (dt:slot-param-dialog)
-    (princ (strcat "\n出线槽参数已保存: 偏移 " (rtos *dt-slot-dist* 2 2)
-                   ", 延长 " (rtos *dt-slot-extend* 2 2)
-                   ", 小圆角 " (rtos *dt-slot-fillet-r-small* 2 2)
-                   ", 大圆角 " (rtos *dt-slot-fillet-r-large* 2 2) "。"))
+(defun c:CXPARAM ( / )
+  (if (dt:cx-param-dialog)
+    (princ (strcat "\n出线槽参数已保存: 偏移 " (rtos *dt-cx-dist* 2 2)
+                   ", 延长 " (rtos *dt-cx-extend* 2 2)
+                   ", 小圆角 " (rtos *dt-cx-fillet-r-small* 2 2)
+                   ", 大圆角 " (rtos *dt-cx-fillet-r-large* 2 2) "。"))
     (princ "\n已取消, 参数未修改。"))
   (princ))
 
 ;; ============================================================================
 ;; 主命令 SLOT —— 在命令行输入 SLOT 即可执行
 ;; ============================================================================
-(defun c:SLOT ( / *error* slot-dist)
+
+
+;; 兼容旧命令别名
+(defun c:SLOTPARAM ( ) (c:CXPARAM))
+(defun c:SLOT ( ) (c:CX))
+(defun c:CX ( / *error* cx-dist)
   ;; ---- 内部错误处理: 出错或按 ESC 中断时给出友好提示 ----
   ;; v10.3: 兜底闭合可能悬挂的 UNDO 组(流程中多处 UNDO BE/E, 出错时
   ;;   End 分支可能未走到; 无开放组时该调用无副作用, catch 双保险)
@@ -1462,26 +1473,26 @@
     (princ (strcat "\n程序已停止: " (if msg msg "用户按 ESC 取消")))
     (princ))
   ;; 先弹参数框(确定后参数已应用; 取消则中止; 弹框后再读参数, 防滞后一轮)
-  (if (null (dt:slot-param-dialog))
+  (if (null (dt:cx-param-dialog))
     (princ "\n已取消, 未执行出线槽。")
     (progn
-      (setq slot-dist *dt-slot-dist*)
+      (setq cx-dist *dt-cx-dist*)
       (if (null (tblsearch "LAYER" "CX"))
         (princ "\n【提示】图层 \"CX\" 不存在, 请先在该图层画好出线槽源线再运行。")
         (progn
           ;; 与主脚本 OFF 一致的约定: "CX"图层同时是源线图层, 不能 purge;
-          ;; 重跑 SLOT 前请先手动删除该图层里上一次生成的通道壁(源线保留)。
-          (dt:slot-process "CX" "CX" slot-dist)
+          ;; 重跑 CX 前请先手动删除该图层里上一次生成的通道壁(源线保留)。
+          (dt:cx-process "CX" "CX" cx-dist)
           (princ "\n【完成】出线槽流程结束。")))))
   (princ))  ; 静默退出, 不打印返回结果
 
 ;;; 加载时在命令行输出提示
-(dt:slot-cfg-boot)
-(princ "\n出线槽工具 v10.3 已加载(参数默认值外置 slot_runner.ini 可记事本修改; 上次值自动记忆)。")
-(princ "\n提示: 垫片(DP)要在运行 SLOT 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
-(princ "\n用法1: 输入 SLOT 执行出线槽流程(弹出参数框, 确定后开始)。")
-(princ "\n用法2: 输入 SLOTPARAM 弹出参数设置对话框(只改参数不执行)。")
-(princ "\n用法3: 输入 (dt:slot-process \"CX\" \"CX\" 17.5) 不弹框直接执行。")
-(princ "\n提示: 出线槽源线画在\"CX\"图层; 重跑 SLOT 前请先手动删除该图层里上一轮的通道壁等产物(源线已被自动删除, 需重画)。")
-(princ "\n提示: 本脚本可与主脚本 offset_runner(分流板)分开单独加载, 互不影响。")
+(dt:cx-cfg-boot)
+(princ "\n出线槽工具 v10.3 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆)。")
+(princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
+(princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
+(princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")
+(princ "\n用法3: 输入 (dt:cx-process \"CX\" \"CX\" 17.5) 不弹框直接执行。")
+(princ "\n提示: 出线槽源线画在\"CX\"图层; 重跑 CX 前请先手动删除该图层里上一轮的通道壁等产物(源线已被自动删除, 需重画)。")
+(princ "\n提示: 本脚本可与主脚本 flb_runner(分流板)分开单独加载, 互不影响。")
 (princ)

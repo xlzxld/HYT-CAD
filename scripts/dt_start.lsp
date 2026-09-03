@@ -1,6 +1,6 @@
 ﻿;;; ============================================================================
 ;;; dt_start.lsp  v2.9 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
-;;; 用途: 与 offset_runner / slot_runner / jrt_runner 三个脚本同目录,
+;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
 ;;;   DTINSTALL   安装自启(写 acaddoc.lsp 钩子 + 加入支持/受信任路径), 装完立即可用
@@ -26,7 +26,7 @@
 ;;;      支持路径最前, 保证 AutoCAD 能搜到它 —— 它只加载搜到的第一个);
 ;;;   3) dt:st-trusted-add/-del 补 null 判断(老版本无安全拦截机制 -> 跳过);
 ;;;   4) DTDBG 增环境探测段: ACADVER + 各系统变量可用性 + acaddoc.lsp 落点。
-;;; 版本规则: 正式版文件名无版本后缀(offset_runner.lsp 等)时**优先加载**;
+;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
 ;;;   1) 家族表扩展为 (前缀 中文名 主命令 参数命令), 加载与菜单共用一张表,
@@ -76,10 +76,10 @@
 ;; 加载(boot)与顶部菜单(menu-build)共用本表; 热键字母在顶栏下拉内不可重复
 ;; v2.7: 加热条挪到出线槽上面(用户使用频率排序)
 (setq dt:st-families
-      (list (list "offset_runner" "分流板" "OFF" "PARAM" "F")
+      (list (list "flb_runner" "分流板" "FLB" "FLBPARAM" "F")
             (list "jrt_runner" "加热条" "JRT" "JRTPARAM" "J")
-            (list "slot_runner" "出线槽" "SLOT" "SLOTPARAM" "C")
-            (list "size_runner" "测量数据" "FLBSZ" nil "M")))
+            (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
+            (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
 (setq dt:st-version "v2.9")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
@@ -189,7 +189,7 @@
        (+ (* (atoi (substr d 1 1)) 1000) (atoi (substr d 2 2)))))
     (T nil)))
 
-;; 家族选版: 目录内该前缀的文件, **无版本后缀的正式版(如 offset_runner.lsp)
+;; 家族选版: 目录内该前缀的文件, **无版本后缀的正式版(如 flb_runner.lsp)
 ;; 优先**; 没有正式版才取"v+数字"最大者(无则 nil)
 (defun dt:st-pick (dir prefix / best bestn f v exact)
   (setq exact (strcat prefix ".lsp"))
@@ -552,7 +552,7 @@
        (progn
          (setq popMain (vla-add pops dt:st-menutitle)
                idx 0)
-         ;; 各脚本家族: 二级子菜单(分流板/加热条/出线槽/测量数据)
+         ;; 各脚本家族: 二级子菜单(分流板/加热条/出线槽/外协加工)
          (foreach fam dt:st-families
            (setq zh (cadr fam) mc (caddr fam) pc (cadddr fam) hk (nth 4 fam))
            (setq sub (vla-addsubmenu popMain idx (strcat zh "(&" hk ")")))
@@ -561,8 +561,11 @@
                (vla-addmenuitem sub 0 (strcat "画" zh "(&D)") (dt:st-macro (strcat "(c:" mc ")")))
                (vla-addmenuitem sub 1 (strcat zh "参数(&P)") (dt:st-macro (strcat "(c:" pc ")"))))
              (progn
-               ;; 测量数据三级项: 测量分流板 (预留后续扩展测量出线槽等)
-               (vla-addmenuitem sub 0 "测量分流板(&F)" (dt:st-macro (strcat "(c:" mc ")")))))
+               ;; 外协加工三级项: 测量分流板 / 线切割 / 精雕 / 数据图纸
+               (vla-addmenuitem sub 0 "测量分流板(&F)" (dt:st-macro (strcat "(c:" mc ")")))
+               (vla-addmenuitem sub 1 "线切割(&W)" (dt:st-macro "(c:XQG)"))
+               (vla-addmenuitem sub 2 "精雕(&J)" (dt:st-macro "(c:JD)"))
+               (vla-addmenuitem sub 3 "数据图纸(&D)" (dt:st-macro "(c:SJTZ)"))))
            (setq idx (1+ idx)))
          ;; 工具子菜单
          (vla-addseparator popMain idx)

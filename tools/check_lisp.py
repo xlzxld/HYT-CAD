@@ -90,24 +90,23 @@ COMMON = ['dt:ms', 'dt:layer-vlas', 'dt:excluded-p',
           'dt:fillet-pair', 'dt:collect-heads', 'dt:pair-heads',
           'dt:offset-enames', 'dt:get-num', 'dt:end-free',
           'dt:set-endpoint', 'dt:bbox-overlap-p']
-PLATE = COMMON + ['c:OFF', 'c:PARAM', 'dt:param-dialog', 'dt:param-apply',
+PLATE = COMMON + ['c:FLB', 'c:FLBPARAM', 'c:OFF', 'c:PARAM', 'dt:param-dialog', 'dt:param-apply',
                   'dt:param-reset', 'dt:dcl-lines', 'dt:write-dcl', 'dt:find-dcl',
                   'dt:trim-all', 'dt:fillet-all', 'dt:close-channels',
                   'dt:drill-holes', 'dt:chamfer-close', 'dt:fillet-close',
                   'dt:offset-layer', 'dt:offset-inward', 'dt:extend-ends',
                   'dt:purge-layer', 'dt:ensure-layer', 'dt:fillet-close-one',
                   'dt:merge-layer', 'dt:nozzle-circles']
-# slot v10.3: fillet-pair 改名 dt:slot-fillet-pair(缺省值绑定本脚本参数,
-# 坑 #46 同名不同体改名隔离); 新增 dt:rect-bbox(cross-points 包围盒预过滤)
-SLOT = [n for n in COMMON if n != 'dt:fillet-pair'] + \
-       ['dt:slot-fillet-pair', 'dt:rect-bbox'] + \
-       ['c:SLOT', 'c:SLOTPARAM', 'dt:slot-param-dialog',
-        'dt:slot-param-apply', 'dt:slot-param-reset',
-        'dt:slot-dcl-lines', 'dt:slot-write-dcl', 'dt:slot-find-dcl',
-        'dt:break-curve', 'dt:collect-ends', 'dt:slot-trim',
-        'dt:slot-fillet-all', 'dt:slot-extend-fixed',
-        'dt:slot-first-cross', 'dt:slot-join', 'dt:near-src-fwd',
-        'dt:slot-close', 'dt:slot-cxk', 'dt:slot-process']
+# cx (原 slot): fillet-pair 改名 dt:cx-fillet-pair
+CX = [n for n in COMMON if n != 'dt:fillet-pair'] + \
+       ['dt:cx-fillet-pair', 'dt:rect-bbox'] + \
+       ['c:CX', 'c:CXPARAM', 'c:SLOT', 'c:SLOTPARAM', 'dt:cx-param-dialog',
+        'dt:cx-param-apply', 'dt:cx-param-reset',
+        'dt:cx-dcl-lines', 'dt:cx-write-dcl', 'dt:cx-find-dcl',
+        'dt:break-curve', 'dt:collect-ends', 'dt:cx-trim',
+        'dt:cx-fillet-all', 'dt:cx-extend-fixed',
+        'dt:cx-first-cross', 'dt:cx-join', 'dt:near-src-fwd',
+        'dt:cx-close', 'dt:cx-cxk', 'dt:cx-process']
 # JRT(加热条)脚本: 与 COMMON 的差异 —— 对话框函数用 dt:jrt-* 改名隔离,
 # 不含封口链(dt:end-free); cut-curve/trim-curve/fillet-pair 因 slot 版
 # 签名/默认值不同也改名隔离(详见 AGENTS.md 双脚本架构说明)
@@ -142,20 +141,22 @@ DTSTART = ['c:DTINSTALL', 'c:DTRELOAD', 'c:DTUNINSTALL', 'c:DTDBG',
            'dt:st-path-list', 'dt:st-split',
            'dt:st-add-support', 'dt:st-del-support',
            'dt:st-trusted-add', 'dt:st-trusted-del']
-# size_runner 尺寸测量脚本
-SIZE = ['c:FLBSZ', 'c:FLBSIZE', 'dt:sz-copy-clip', 'dt:sz-curve-sample-pts',
-        'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
-        'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
-        'dt:sz-draw-box-dim']
+# wx_runner 外协加工与尺寸测量脚本
+WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
+      'dt:sz-copy-clip', 'dt:sz-curve-sample-pts',
+      'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
+      'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
+      'dt:sz-draw-box-dim', 'dt:sz-gets', 'dt:sz-ensure-style',
+      'dt:sz-export-to-dwg']
 
 if 'dt_start' in base:
     need = DTSTART
-elif 'slot' in base:
-    need = SLOT
+elif 'cx' in base or 'slot' in base:
+    need = CX
 elif 'jrt' in base:
     need = JRT
-elif 'size' in base:
-    need = SIZE
+elif 'wx' in base or 'size' in base:
+    need = WX
 else:
     need = PLATE
 missing = [n for n in need if '(defun %s' % n not in code]

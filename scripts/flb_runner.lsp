@@ -1,6 +1,6 @@
 ﻿;;; ============================================================================
 ;;; 程序名 : 流道线双向偏移 + 区域裁剪 + 断口圆角 + 通道封口 + 螺丝孔定位
-;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (offset_runner.lsp)  v10.6
+;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.6
 ;;; v10.6  : 健壮性修复(与 slot v10.3 / jrt v9.14 / dt_start v2.8 同期,
 ;;;          几何行为零变化):
 ;;;          1) 非曲线实体防护补全 —— v10.2b 只防了封口/端点收集侧, 本次
@@ -17,7 +17,7 @@
 ;;;          5) 参数应用增加负值校验(负值回退当前值);
 ;;;          6) cross-points 加包围盒预过滤(复用 dt:rect-bbox, bbox 不
 ;;;             相交跳过 COM 求交, 结果不变, 大图提速)。
-;;; 多模板 : v9.8 起支持多套规则模板(dt:off-template-table, 模式同 jrt_runner)。
+;;; 多模板 : v9.8 起支持多套规则模板(dt:flb-template-table, 模式同 jrt_runner)。
 ;;;          OFF 执行时先弹模板选择框(单选, 取消中止):
 ;;;          "通用" = 现状全流程(偏移+裁剪+圆角+封口+螺丝+倒角+假体+热咀);
 ;;;          "矩形" = LD 整体范围向外扩「分流板偏移距离」画矩形板边, 四角
@@ -47,7 +47,7 @@
 ;;;          8) 热咀+点孔(v9.2~v9.4): 每条封口线端头沿通道向内偏移
 ;;;             热咀偏移(默认40)处画热咀半径(默认11.35)圆 → "RZ"(橙) +
 ;;;             同心点孔半径(默认3)圆 → "DK"(白); 另预留 "DP" 垫片层(蓝);
-;;;          9) 出线槽已独立: v9.0 起出线槽拆分为独立脚本 slot_runner
+;;;          9) 出线槽已独立: v9.0 起出线槽拆分为独立脚本 cx_runner
 ;;;             (命令 SLOT/SLOTPARAM), 本脚本不再处理出线槽。
 ;;; 图层约定(v9.4 起用拼音缩写, 中英对照; v9.7 起 OFF 预建全部 13 层):
 ;;;   "LD"    = 流道线(源中心线图层, 用户画; OFF 预建空层属正常)
@@ -59,11 +59,11 @@
 ;;;   "RZ"    = 热咀圆(橙色)
 ;;;   "DK"    = 点孔圆(白色, 与热咀圆同心)
 ;;;   "DP"    = 垫片(蓝色, 预留层: 只创建不自动绘制, 不参与重跑清理)
-;;;   "CX"    = 出线槽(归独立脚本 slot_runner 管理)
+;;;   "CX"    = 出线槽(归独立脚本 cx_runner 管理)
 ;;;   "CXK"   = 出线口(蓝色, slot v9.9 分流产物层: 距 DP 最远的封闭线)
 ;;;   "JRT"   = 加热条(黄色, 归独立脚本 jrt_runner 管理)
 ;;;   "JRTDW" = 加热条定位(黄色, jrt 通用二模板向内基准, 用户画定位线)
-;;; 加载   : APPLOAD 选择本文件加载(offset_runner.dcl 由脚本自动生成,
+;;; 加载   : APPLOAD 选择本文件加载(flb_runner.dcl 由脚本自动生成,
 ;;;          无需手工准备)。
 ;;; 运行   : 加载后在命令行输入 OFF 并回车, 弹出参数对话框, 确认后全程
 ;;;          自动执行, 无需人工选择。
@@ -79,7 +79,7 @@
 ;;;
 ;;; 版本   : v9.0 = v8.16 逻辑原样 + 全面整理(删废弃函数/去重重构/精简注释,
 ;;;          此前内部迭代号 v9.0/v9.1 合并为本系列起点)+ 出线槽拆分独立
-;;;          为 slot_runner(命令 SLOT)。
+;;;          为 cx_runner(命令 SLOT)。
 ;;;          v9.1 = 封口线收尾并层: 倒角后"封闭线"并入"分流板"、圆角后
 ;;;          "分流板假体封闭线"并入"分流板假体", 两封闭线图层随之移除;
 ;;;          "分流板挖孔"全部更名"分流板假体"。
@@ -110,16 +110,16 @@
 ;;;          的输出参数部分版本绑定为 safearray 本体(非 variant), 解包
 ;;;          改为两种绑定兼容(dt:rect-bb-pts)。
 ;;;          v9.9 = 参数框按模板动态显示(v9.8 方案A落地, 同 jrt v9.9):
-;;;          dt:off-template-table 各模板参数默认表列出该模板用到的键,
+;;;          dt:flb-template-table 各模板参数默认表列出该模板用到的键,
 ;;;          dt:dcl-lines 按键动态生成 edit_box, 预填/应用/恢复默认/命令行
 ;;;          汇总都只处理当前模板的键; 未列出的参数选模板时重置为默认。
 ;;;          v10.0 = 矩形模板: 螺丝孔内偏默认 15(通用模板保持 10); 画完
 ;;;          自动删除 LD 源线(slot v9.6 同款约定, 重跑需重画, 与画图同组
 ;;;          撤销)。FBX/JTFBX 空临时层对 NX 建模脚本无影响(建模仅认
 ;;;          LAYER_TABLE 图层), 不处理。
-;;;          v10.1 = 参数默认值外置 offset_runner.ini(按模板分节, 记事本
+;;;          v10.1 = 参数默认值外置 flb_runner.ini(按模板分节, 记事本
 ;;;          可改, 弹框前重读=随时生效, 首次运行自动生成); 参数记忆
-;;;          offset_runner_mem.ini(按模板各一套, 确定参数框自动保存, 上次
+;;;          flb_runner_mem.ini(按模板各一套, 确定参数框自动保存, 上次
 ;;;          模板+上次值跨会话恢复); 恢复默认按钮 = ini 配置的默认值。
 ;;;          v10.2 = 假体重构为"包络法": JT = FLB 包络盒外扩(hole-dist -
 ;;;          offset-dist)的圆角矩形, 四角 R=假体圆角R —— 与矩形模板假体同
@@ -194,24 +194,24 @@
 (setq *dt-jt-envelope* nil)  ; v10.5: 假体包络法开关(参数框勾选框; 默认关=传统逐步; ini[假体]节/mem 可改)
 
 ;; ============================================================================
-;; 参数配置与记忆(v10.1): 默认值外置 offset_runner.ini(按模板分节, 记事本可改,
-;; 每次弹框前重读=随时生效); 上次值记忆 offset_runner_mem.ini(按模板各一套,
+;; 参数配置与记忆(v10.1): 默认值外置 flb_runner.ini(按模板分节, 记事本可改,
+;; 每次弹框前重读=随时生效); 上次值记忆 flb_runner_mem.ini(按模板各一套,
 ;; 确定参数框时自动保存, 上次模板+上次值跨会话恢复)。
 ;; 解析只认"键 = 数值"行, 注释/空行/未知键跳过; 全程 vl-catch-all 保护,
 ;; 文件缺失/损坏静默回退代码内置默认。命名带 dt:off- 前缀防同加载覆盖(坑 #46)。
-;; 函数在此定义, 启动 (dt:off-cfg-boot) 在文件尾调用(定义须先于执行)。
+;; 函数在此定义, 启动 (dt:flb-cfg-boot) 在文件尾调用(定义须先于执行)。
 ;; ============================================================================
-(setq *dt-off-cfg* nil   ; 配置(默认值) ((节 (键 . 值)...) ...) 节=模板名
-      *dt-off-mem* nil)  ; 记忆(上次值)   同结构 + [模板] template=下标
+(setq *dt-flb-cfg* nil   ; 配置(默认值) ((节 (键 . 值)...) ...) 节=模板名
+      *dt-flb-mem* nil)  ; 记忆(上次值)   同结构 + [模板] template=下标
 
 ;; 配置/记忆文件目录: 优先 dt_start 注入的脚本目录, 无则 TEMP(与 find-dcl 同规则)
-(defun dt:off-cfg-dir ( / )
+(defun dt:flb-cfg-dir ( / )
   (if (and *dt-script-dir* (/= *dt-script-dir* ""))
     *dt-script-dir*
     (getenv "TEMP")))
 
 ;; 单行 "键 = 数值" → (键 . 值); 无等号/空值/非数值返回 nil(distof 校验, 0 合法)
-(defun dt:off-cfg-kv (ln / p k vs n)
+(defun dt:flb-cfg-kv (ln / p k vs n)
   (setq p (vl-string-search "=" ln))
   (if p
     (progn
@@ -222,7 +222,7 @@
     nil))
 
 ;; 读 INI → ((节名 (键 . 值)...) ...); 文件不存在/读失败返回 nil
-(defun dt:off-cfg-read (path / f ln sec ent tmp secs)
+(defun dt:flb-cfg-read (path / f ln sec ent tmp secs)
   (setq secs nil sec nil)
   (vl-catch-all-apply
     '(lambda ( )
@@ -240,7 +240,7 @@
                 ;;   会连带尾部 "]"(变成 "通用]")导致配置节永远匹配不上。
                 ;;   改为截到行尾再统一裁方括号, 新旧 LISP 都正确。
                 (setq sec (vl-string-trim " \t[]" (substr ln 2))))
-               ((setq ent (dt:off-cfg-kv ln))
+               ((setq ent (dt:flb-cfg-kv ln))
                 (if (and sec (/= sec ""))
                   (progn
                     (setq tmp (vl-remove (assoc (car ent) (cdr (assoc sec secs)))
@@ -256,36 +256,36 @@
   (reverse secs))
 
 ;; 数据 → 指定节的键值表(无该节 nil)
-(defun dt:off-cfg-sec (data sec / e)
+(defun dt:flb-cfg-sec (data sec / e)
   (if (and data (setq e (assoc sec data))) (cdr e)))
 
 ;; 节内取键值(无该键 nil; 值可为 0, 0 非 nil 仍算"有")
-(defun dt:off-cfg-get (data sec key)
-  (cdr (assoc key (dt:off-cfg-sec data sec))))
+(defun dt:flb-cfg-get (data sec key)
+  (cdr (assoc key (dt:flb-cfg-sec data sec))))
 
 ;; 当前模板的参数默认值: ini 配置节 → 模板内置默认表 → dt:param-table caddr
-(defun dt:off-param-default (key / tpl v)
-  (setq tpl (dt:off-template-row))
-  (cond ((setq v (dt:off-cfg-get *dt-off-cfg* (car tpl) key)) v)
+(defun dt:flb-param-default (key / tpl v)
+  (setq tpl (dt:flb-template-row))
+  (cond ((setq v (dt:flb-cfg-get *dt-flb-cfg* (car tpl) key)) v)
         ((cdr (assoc key (nth 2 tpl))))
         (T (caddr (assoc key dt:param-table)))))
 
 ;; 首次自动生成配置文件(按模板分节 + 中文注释标签)
-(defun dt:off-cfg-gen (path / f tpl kv lbl)
+(defun dt:flb-cfg-gen (path / f tpl kv lbl)
   (vl-catch-all-apply
     '(lambda ( )
        (setq f (open path "w"))
        (if f
          (progn
-           (write-line "; offset_runner 参数默认值配置(首次运行自动生成, 记事本可改)" f)
+           (write-line "; flb_runner 参数默认值配置(首次运行自动生成, 记事本可改)" f)
            (write-line "; 按模板分节; 改数值保存后, 下次打开模板/参数窗口即生效(无需重载)" f)
            (write-line "; 恢复默认按钮 = 本文件的值; 删除本文件 = 回代码内置默认" f)
-           (write-line "; 上次填的值在 offset_runner_mem.ini(程序自动维护, 一般不用管)" f)
+           (write-line "; 上次填的值在 flb_runner_mem.ini(程序自动维护, 一般不用管)" f)
            (write-line "" f)
-           (foreach tpl dt:off-template-table
+           (foreach tpl dt:flb-template-table
              (write-line (strcat "[" (car tpl) "]") f)
              (foreach kv (nth 2 tpl)
-               (setq lbl (cdr (assoc (car kv) dt:off-param-labels)))
+               (setq lbl (cdr (assoc (car kv) dt:flb-param-labels)))
                (if lbl (write-line (strcat "; " lbl) f))
                (write-line (strcat (car kv) " = " (rtos (cdr kv) 2 4)) f))
              (write-line "" f))
@@ -301,24 +301,24 @@
   T)
 
 ;; 确定参数框后保存当前模板的上次值(每模板各一套; 只存该模板可见键)
-(defun dt:off-mem-save ( / name keys vals path sc f kv)
-  (setq name (car (dt:off-template-row))
-        keys (dt:off-tpl-keys)
+(defun dt:flb-mem-save ( / name keys vals path sc f kv)
+  (setq name (car (dt:flb-template-row))
+        keys (dt:flb-tpl-keys)
         vals (mapcar '(lambda (k) (cons k (eval (cadr (assoc k dt:param-table)))))
                      keys))
-  (setq *dt-off-mem* (cons (cons name vals)
-                           (vl-remove (assoc name *dt-off-mem*) *dt-off-mem*))
-        path (strcat (dt:off-cfg-dir) "\\offset_runner_mem.ini"))
+  (setq *dt-flb-mem* (cons (cons name vals)
+                           (vl-remove (assoc name *dt-flb-mem*) *dt-flb-mem*))
+        path (strcat (dt:flb-cfg-dir) "\\flb_runner_mem.ini"))
   (vl-catch-all-apply
     '(lambda ( )
        (setq f (open path "w"))
        (if f
          (progn
-           (write-line "; offset_runner 参数记忆(确定参数窗口时自动更新, 可删除)" f)
+           (write-line "; flb_runner 参数记忆(确定参数窗口时自动更新, 可删除)" f)
            (write-line "[模板]" f)
-           (write-line (strcat "template = " (itoa *dt-off-template*)) f)
+           (write-line (strcat "template = " (itoa *dt-flb-template*)) f)
            (write-line "" f)
-           (foreach sc *dt-off-mem*
+           (foreach sc *dt-flb-mem*
              ;; v10.2d: 跳过 "[模板]" 节(上方已单独写出)—— 此前会把它再写
              ;;   一遍, 造成 mem 文件里出现两个 [模板](第二个值为 rtos 格式)
              ;; v10.5: 同理跳过 "[假体]" 节(下方已单独写出)
@@ -339,19 +339,19 @@
   (princ))
 
 ;; 加载末尾调用: 生成缺失配置 + 恢复上次模板与该模板的上次参数值
-(defun dt:off-cfg-boot ( / path idx)
+(defun dt:flb-cfg-boot ( / path idx)
   (vl-catch-all-apply
     '(lambda ( )
-       (setq path (strcat (dt:off-cfg-dir) "\\offset_runner.ini"))
-       (setq *dt-off-cfg* (dt:off-cfg-read path))
-       (if (null *dt-off-cfg*)
+       (setq path (strcat (dt:flb-cfg-dir) "\\flb_runner.ini"))
+       (setq *dt-flb-cfg* (dt:flb-cfg-read path))
+       (if (null *dt-flb-cfg*)
          (progn
-           (dt:off-cfg-gen path)
-           (setq *dt-off-cfg* (dt:off-cfg-read path))))
-       (setq *dt-off-mem*
-             (dt:off-cfg-read (strcat (dt:off-cfg-dir) "\\offset_runner_mem.ini")))
+           (dt:flb-cfg-gen path)
+           (setq *dt-flb-cfg* (dt:flb-cfg-read path))))
+       (setq *dt-flb-mem*
+             (dt:flb-cfg-read (strcat (dt:flb-cfg-dir) "\\flb_runner_mem.ini")))
        ;; v10.5: 旧 ini 迁移 —— [假体] 节缺失时追加(不重写全文件, 保留用户已改值)
-       (if (null (dt:off-cfg-get *dt-off-cfg* "假体" "envelope"))
+       (if (null (dt:flb-cfg-get *dt-flb-cfg* "假体" "envelope"))
          (vl-catch-all-apply
            '(lambda ( / f)
               (setq f (open path "a"))
@@ -368,16 +368,16 @@
                   (close f)))))
          nil)
        ;; v10.5: 勾选框恢复 —— 记忆值优先, 无记忆用 ini 默认(缺省关)
-       (setq idx (dt:off-cfg-get *dt-off-mem* "假体" "envelope"))
-       (if (null idx) (setq idx (dt:off-cfg-get *dt-off-cfg* "假体" "envelope")))
+       (setq idx (dt:flb-cfg-get *dt-flb-mem* "假体" "envelope"))
+       (if (null idx) (setq idx (dt:flb-cfg-get *dt-flb-cfg* "假体" "envelope")))
        (setq *dt-jt-envelope* (and idx (/= idx 0.0)))
-       (setq idx (dt:off-cfg-get *dt-off-mem* "模板" "template"))
+       (setq idx (dt:flb-cfg-get *dt-flb-mem* "模板" "template"))
        (if (and idx (numberp idx)
-                (>= (fix idx) 0) (< (fix idx) (length dt:off-template-table)))
+                (>= (fix idx) 0) (< (fix idx) (length dt:flb-template-table)))
          (progn
-           (setq *dt-off-template* (fix idx)
-                 *dt-off-tpl-pick* (fix idx))
-           (dt:off-apply-template (fix idx) T))))
+           (setq *dt-flb-template* (fix idx)
+                 *dt-flb-tpl-pick* (fix idx))
+           (dt:flb-apply-template (fix idx) T))))
     nil)
   (princ))
 
@@ -849,7 +849,7 @@
 
 ;; 处理一个断口对: 计算圆角几何, 递减半径, 方向验证, 修剪两线, 创建圆角弧, 必要时标注
 ;; h1/h2 = (对象 端类型" S"/"E" 端头点 指向主体方向)
-;; layer = 圆角弧/标注文字所在图层(默认"FLB"; 出线槽 slot_runner 传"CX"等)
+;; layer = 圆角弧/标注文字所在图层(默认"FLB"; 出线槽 cx_runner 传"CX"等)
 ;; r-start = 圆角起始半径(v8.2 拆分: 分流板传 *dt-fillet-r*, 挖孔传 *dt-fillet-r-hole*)
 ;; nochk = T 时跳过圆心区域方向验证(v9.5 大圆角: 延长接头处两源线区域
 ;;         不重叠, 区域检查会误拒正确方向; b1 与小圆角同公式, 方向由
@@ -1800,7 +1800,7 @@
 ;; 六b、参数对话框 —— v8.0 新增, v8.1 增强(自动生成 dcl, 不再依赖外部文件)
 ;; 可视化界面: 输入 PARAM 弹出参数设置对话框(只改参数不执行);
 ;;           OFF 命令执行前也会弹出(确定则执行, 取消则中止)。
-;; 依赖文件: 优先用外部 offset_runner.dcl(可自行修改界面布局);
+;; 依赖文件: 优先用外部 flb_runner.dcl(可自行修改界面布局);
 ;;           找不到时由本文件内置的 DCL 源文本自动生成(v8.1), 保证界面可用。
 ;; ============================================================================
 
@@ -1808,18 +1808,18 @@
 ;; v9.9: 参数框 edit_box 按当前模板的参数键动态生成(两个一行; 通用
 ;; 11 项 6 行 / 矩形 8 项 4 行), 顶部文本显示当前模板名
 (defun dt:dcl-lines ( / keys lines row k1 k2)
-  (setq keys (dt:off-tpl-keys) lines nil)
+  (setq keys (dt:flb-tpl-keys) lines nil)
   (while keys
     (setq k1 (car keys)
           k2 (cadr keys)
           row (list "    : row {"
                     (strcat "      : edit_box { key = \"" k1
-                            "\"; label = \"" (cdr (assoc k1 dt:off-param-labels))
+                            "\"; label = \"" (cdr (assoc k1 dt:flb-param-labels))
                             "\"; edit_width = 10; }")))
     (if k2
       (setq row (append row
         (list (strcat "      : edit_box { key = \"" k2
-                      "\"; label = \"" (cdr (assoc k2 dt:off-param-labels))
+                      "\"; label = \"" (cdr (assoc k2 dt:flb-param-labels))
                       "\"; edit_width = 10; }")))
             keys (cddr keys))
       (setq keys nil))
@@ -1852,7 +1852,7 @@
       ;; v10.6: 写中途异常也保证 close(半截 dcl 由对话框链的 catch 提示)
       (vl-catch-all-apply
         '(lambda ( )
-           (foreach ln (append (dt:dcl-lines) (list "") (dt:off-template-dcl-lines))
+           (foreach ln (append (dt:dcl-lines) (list "") (dt:flb-template-dcl-lines))
              (write-line ln f)))
         nil)
       (close f)
@@ -1866,8 +1866,8 @@
 ;; 总是用内置源覆盖生成最新 dcl(界面参数永远与脚本同步)。
 (defun dt:find-dcl ( / )
   (if (and *dt-script-dir* (/= *dt-script-dir* ""))
-    (dt:write-dcl (strcat *dt-script-dir* "\\offset_runner.dcl"))
-    (dt:write-dcl (strcat (getenv "TEMP") "\\offset_runner_tmp.dcl"))))
+    (dt:write-dcl (strcat *dt-script-dir* "\\flb_runner.dcl"))
+    (dt:write-dcl (strcat (getenv "TEMP") "\\flb_runner_tmp.dcl"))))
 
 ;; 读取编辑框数值: 空/非法输入时返回默认值 def
 ;; v10.2d: 原用 atof —— 它对垃圾串静默返回 0(如 "abc" -> 0.0), 参数会被
@@ -1882,14 +1882,14 @@
 ;; 模板动态生成, 键不存在 set_tile 会报错);
 ;; v10.1 = 恢复 ini 配置默认值(先重读配置, 改 ini 后点恢复默认立即生效)
 (defun dt:param-reset ( / val p)
-  (setq *dt-off-cfg* (dt:off-cfg-read (strcat (dt:off-cfg-dir) "\\offset_runner.ini")))
+  (setq *dt-flb-cfg* (dt:flb-cfg-read (strcat (dt:flb-cfg-dir) "\\flb_runner.ini")))
   (foreach p dt:param-table
-    (if (member (car p) (dt:off-tpl-keys))
+    (if (member (car p) (dt:flb-tpl-keys))
       (progn
-        (setq val (dt:off-param-default (car p)))
+        (setq val (dt:flb-param-default (car p)))
         (set_tile (car p) (rtos val 2 2)))))
   ;; v10.5: 勾选框同步恢复 ini 默认(注意 0 是合法值, 0 非 nil, 不能直接 if 值判)
-  (setq val (dt:off-cfg-get *dt-off-cfg* "假体" "envelope"))
+  (setq val (dt:flb-cfg-get *dt-flb-cfg* "假体" "envelope"))
   (set_tile "jt_envelope" (if (and val (/= val 0.0)) "1" "0")))
 
 ;; 应用对话框值到全局参数(确定按钮回调; 只读当前模板的键, 其余参数
@@ -1897,18 +1897,18 @@
 ;; v10.1: 应用后自动保存记忆(取消不触发本回调, 天然"确定才记忆")
 (defun dt:param-apply ( / p v)
   (foreach p dt:param-table
-    (if (member (car p) (dt:off-tpl-keys))
+    (if (member (car p) (dt:flb-tpl-keys))
       (progn
         (setq v (dt:get-num (car p) (eval (cadr p))))
         ;; v10.6: 负值校验 —— 距离/半径类参数 <0 回退当前值(负值会画出退化几何)
         (if (< v 0.0) (setq v (eval (cadr p))))
         (set (cadr p) v))))
-  (dt:off-mem-save))
+  (dt:flb-mem-save))
 
 ;; 弹出参数对话框
 ;; 返回: T=用户点"确定"(参数已应用到全局变量), nil=取消/加载失败
 (defun dt:param-dialog ( / dcl-file dcl-id result p)
-  (setq *dt-off-cfg* (dt:off-cfg-read (strcat (dt:off-cfg-dir) "\\offset_runner.ini")))
+  (setq *dt-flb-cfg* (dt:flb-cfg-read (strcat (dt:flb-cfg-dir) "\\flb_runner.ini")))
   (setq dcl-file (dt:find-dcl))
   (if (null dcl-file)
     (progn
@@ -1926,10 +1926,10 @@
           (if (new_dialog "dt_param" dcl-id)
             (progn
               (set_tile "tpl_name"
-                        (strcat "当前模板: " (nth 0 (dt:off-template-row))))
+                        (strcat "当前模板: " (nth 0 (dt:flb-template-row))))
               ;; 预填当前模板的参数值(键不存在 set_tile 会报错)
               (foreach p dt:param-table
-                (if (member (car p) (dt:off-tpl-keys))
+                (if (member (car p) (dt:flb-tpl-keys))
                   (set_tile (car p) (rtos (eval (cadr p)) 2 2))))
               ;; v10.5: 包络法勾选框预填
               (set_tile "jt_envelope" (if *dt-jt-envelope* "1" "0"))
@@ -1949,12 +1949,15 @@
 
 ;; 命令 PARAM: 弹出参数设置对话框(只修改参数, 不执行偏移);
 ;; 汇总按当前模板的参数键输出(v9.9 动态)
-(defun c:PARAM ( / p txt)
+
+;; 兼容旧命令别名
+(defun c:PARAM ( ) (c:FLBPARAM))
+(defun c:FLBPARAM ( / p txt)
   (if (dt:param-dialog)
     (progn
-      (setq txt (strcat "\n参数已保存(模板: " (nth 0 (dt:off-template-row)) "):"))
-      (foreach p (dt:off-tpl-keys)
-        (setq txt (strcat txt " " (cdr (assoc p dt:off-param-labels)) " "
+      (setq txt (strcat "\n参数已保存(模板: " (nth 0 (dt:flb-template-row)) "):"))
+      (foreach p (dt:flb-tpl-keys)
+        (setq txt (strcat txt " " (cdr (assoc p dt:flb-param-labels)) " "
                           (rtos (eval (cadr (assoc p dt:param-table))) 2 2))))
       (princ (strcat txt "。")))
     (princ "\n已取消, 参数未修改。"))
@@ -1962,7 +1965,7 @@
 
 ;; ============================================================================
 ;; 六c、多模板框架 + 矩形分流板模板 (v9.8, 框架模式同 jrt_runner v9.8)
-;; dt:off-template-table 每行: (名称 说明 参数默认表 覆盖表);
+;; dt:flb-template-table 每行: (名称 说明 参数默认表 覆盖表);
 ;; 覆盖表含 (process . 函数) 时整个主流程由该函数自管(建层/清理/绘制/统计),
 ;; 不走内置偏移流程; 覆盖表 nil = 全部用内置流程(通用模板)。
 ;; 新增模板 = 表中加一行(必要时新增覆盖 defun)。函数/全局名全部带 off/rect
@@ -1971,7 +1974,7 @@
 
 ;; 参数默认表列出该模板用到的参数键(参数框按模板动态显示, v9.9 同 jrt);
 ;; 未列出的键在选择模板时重置为 dt:param-table 默认值。
-(setq dt:off-template-table
+(setq dt:flb-template-table
       (list
         (list "通用"
               "现状全流程: 偏移+裁剪+断口圆角+封口+螺丝+倒角+假体+热咀"
@@ -1989,11 +1992,11 @@
                 ("screw_r" . 4.25) ("nozzle_r" . 11.35)
                 ("pin_r" . 3.0) ("rect_chamfer" . 10.0))
               '((process . dt:rect-process)))))
-(setq *dt-off-template* 0)  ; 当前选中模板下标(选择框确定后更新)
-(setq *dt-off-tpl-pick* 0)  ; 选择框单选过程中的临时下标(回调写入)
+(setq *dt-flb-template* 0)  ; 当前选中模板下标(选择框确定后更新)
+(setq *dt-flb-tpl-pick* 0)  ; 选择框单选过程中的临时下标(回调写入)
 
 ;; 参数键 → 中文标签(动态参数框 edit_box 标签与命令行汇总共用, v9.9)
-(setq dt:off-param-labels
+(setq dt:flb-param-labels
       '(("offset_dist"   . "分流板偏移距离:")
         ("hole_dist"     . "假体偏移距离:")
         ("hole_extend"   . "假体端头延长:")
@@ -2008,24 +2011,24 @@
         ("rect_chamfer"  . "板角倒角:")))
 
 ;; 当前模板用到的参数键列表(= 模板参数默认表的键序; v9.9 参数框动态化)
-(defun dt:off-tpl-keys ( / )
-  (mapcar 'car (nth 2 (dt:off-template-row))))
+(defun dt:flb-tpl-keys ( / )
+  (mapcar 'car (nth 2 (dt:flb-template-row))))
 
 ;; 当前模板行
-(defun dt:off-template-row ( / row)
-  (setq row (nth *dt-off-template* dt:off-template-table))
-  (if row row (nth 0 dt:off-template-table)))
+(defun dt:flb-template-row ( / row)
+  (setq row (nth *dt-flb-template* dt:flb-template-table))
+  (if row row (nth 0 dt:flb-template-table)))
 
 ;; 采用指定模板: 设当前下标并把参数写入全局;
 ;; v10.1 值来源优先级: 该模板记忆值 → ini 配置节 → 模板内置默认表 → 表 caddr
 ;; quiet=T 静默(加载时恢复用), nil 打印(模板框切换用)
-(defun dt:off-apply-template (idx quiet / tpl params p v)
-  (setq *dt-off-template* idx
-        tpl (nth idx dt:off-template-table)
+(defun dt:flb-apply-template (idx quiet / tpl params p v)
+  (setq *dt-flb-template* idx
+        tpl (nth idx dt:flb-template-table)
         params (nth 2 tpl))
   (foreach p dt:param-table
-    (setq v (cond ((cdr (assoc (car p) (dt:off-cfg-sec *dt-off-mem* (car tpl)))))
-                  ((dt:off-cfg-get *dt-off-cfg* (car tpl) (car p)))
+    (setq v (cond ((cdr (assoc (car p) (dt:flb-cfg-sec *dt-flb-mem* (car tpl)))))
+                  ((dt:flb-cfg-get *dt-flb-cfg* (car tpl) (car p)))
                   ((cdr (assoc (car p) params)))
                   (T (caddr p))))
     (set (cadr p) v))
@@ -2034,13 +2037,13 @@
   (princ))
 
 ;; 模板选择框 DCL 源文本(由注册表动态生成 radio_button 列表)
-(defun dt:off-template-dcl-lines ( / lines i tpl)
-  (setq lines (list "off_template_select : dialog {"
+(defun dt:flb-template-dcl-lines ( / lines i tpl)
+  (setq lines (list "flb_template_select : dialog {"
                     "  label = \"选择分流板模板\";"
                     "  : boxed_radio_column {"
                     "    label = \"模板\";")
         i 0)
-  (foreach tpl dt:off-template-table
+  (foreach tpl dt:flb-template-table
     (setq lines (append lines
       (list (strcat "    : radio_button { key = \"otpl" (itoa i)
                     "\"; label = \"" (nth 0 tpl) " — " (nth 1 tpl) "\"; }")))
@@ -2054,8 +2057,8 @@
 
 ;; 独立模板选择框: 单选模板 → 确定=采用该模板, 取消=nil(中止流程)
 ;; v10.1: 打开前重读 ini 配置(改配置后切模板立即用新默认)
-(defun dt:off-template-dialog ( / dcl-file dcl-id result idx tpl)
-  (setq *dt-off-cfg* (dt:off-cfg-read (strcat (dt:off-cfg-dir) "\\offset_runner.ini")))
+(defun dt:flb-template-dialog ( / dcl-file dcl-id result idx tpl)
+  (setq *dt-flb-cfg* (dt:flb-cfg-read (strcat (dt:flb-cfg-dir) "\\flb_runner.ini")))
   (setq dcl-file (dt:find-dcl))
   (if (null dcl-file)
     (progn
@@ -2069,22 +2072,22 @@
           (princ "\n【模板】对话框文件加载失败。")
           nil)
         (progn
-          (if (new_dialog "off_template_select" dcl-id)
+          (if (new_dialog "flb_template_select" dcl-id)
             (progn
-              ;; 预选当前模板; 单选回调记录到 *dt-off-tpl-pick*
-              (setq *dt-off-tpl-pick* *dt-off-template*)
-              (set_tile (strcat "otpl" (itoa *dt-off-template*)) "1")
+              ;; 预选当前模板; 单选回调记录到 *dt-flb-tpl-pick*
+              (setq *dt-flb-tpl-pick* *dt-flb-template*)
+              (set_tile (strcat "otpl" (itoa *dt-flb-template*)) "1")
               (setq idx 0)
-              (foreach tpl dt:off-template-table
+              (foreach tpl dt:flb-template-table
                 (action_tile (strcat "otpl" (itoa idx))
-                             (strcat "(setq *dt-off-tpl-pick* " (itoa idx) ")"))
+                             (strcat "(setq *dt-flb-tpl-pick* " (itoa idx) ")"))
                 (setq idx (1+ idx)))
               (action_tile "accept" "(done_dialog 1)")
               (action_tile "cancel" "(done_dialog 0)")
               (setq result (vl-catch-all-apply 'start_dialog nil))
               (unload_dialog dcl-id)
               (if (and (not (vl-catch-all-error-p result)) (= result 1))
-                (progn (dt:off-apply-template *dt-off-tpl-pick* nil) T)
+                (progn (dt:flb-apply-template *dt-flb-tpl-pick* nil) T)
                 nil))
             (progn
               (unload_dialog dcl-id)
@@ -2337,7 +2340,10 @@
 ;; ============================================================================
 ;; 七、主命令 c:OFF —— 在命令行输入 OFF 即可执行
 ;; ============================================================================
-(defun c:OFF ( / *error* doc layers src-layer new-layer close-layer screw-layer
+
+;; 兼容旧命令别名
+(defun c:OFF ( ) (c:FLB))
+(defun c:FLB ( / *error* doc layers src-layer new-layer close-layer screw-layer
                hole-layer hole-close-layer
                offset-dist hole-dist hole-extend
                ss total ok-count skip-count total-purged res-off l)
@@ -2355,11 +2361,11 @@
   ;; 读到的是上一轮的全局值, 本轮对话框修改要下一轮才生效(滞后一轮)
   ;; v9.8: 最前面先弹模板选择框(通用/矩形); 覆盖表含 process 的模板
   ;; (矩形)整个主流程自管(建层/清理/绘制/统计), 不进入下方内置流程。
-  (if (null (dt:off-template-dialog))
+  (if (null (dt:flb-template-dialog))
     (princ "\n已取消(未选模板), 未执行。")
     (if (null (dt:param-dialog))
       (princ "\n已取消, 未执行偏移。")
-      (if (setq res-off (cdr (assoc 'process (nth 3 (dt:off-template-row)))))
+      (if (setq res-off (cdr (assoc 'process (nth 3 (dt:flb-template-row)))))
         (apply res-off nil)
         (progn
       ;; ================= 参数设置 (v8.0: 从全局变量读取, 对话框确定后已更新) =================
@@ -2425,7 +2431,7 @@
                                 (dt:purge-layer "DK")))
           ;; 注意: DP(垫片)/CX(出线槽)/CXK(出线口)/JRT(加热条)/
           ;; JRTDW(加热条定位)均不清理 —— DP/JRTDW 留给用户手动绘制,
-          ;; CX/CXK 归 slot_runner 脚本, JRT 归 jrt_runner 脚本(重跑各自自清)。
+          ;; CX/CXK 归 cx_runner 脚本, JRT 归 jrt_runner 脚本(重跑各自自清)。
           (command "_.UNDO" "E")
           (princ (strcat "\n已清理上一轮产物 " (itoa total-purged)
                          " 个对象(FLB/FBX/LS/JT/JTFBX/RZ/DK 图层)。"))
@@ -2540,7 +2546,7 @@
               (command "_.UNDO" "E")))
 
           ;; ------------------------------------------------------------
-          ;; (v9.0 起: 出线槽流程已移至独立脚本 slot_runner, 命令 SLOT)
+          ;; (v9.0 起: 出线槽流程已移至独立脚本 cx_runner, 命令 SLOT)
           ;; ------------------------------------------------------------
 
           ;; ------------------------------------------------------------
@@ -2551,7 +2557,7 @@
           (princ (strcat "\n分流板\"" new-layer "\"(红), 螺丝孔\"" screw-layer "\"(青), "
                          "分流板假体\"" hole-layer "\"(洋红)。"
                          "封口线已分别并入分流板/假体图层(封闭线图层已移除)。"
-                         "出线槽请用 slot_runner 脚本(SLOT 命令)。"))
+                         "出线槽请用 cx_runner 脚本(CX 命令)。"))
         )
       )
       )
@@ -2562,15 +2568,15 @@
 )
 
 ;;; 加载时在命令行输出提示
-(dt:off-cfg-boot)
+(dt:flb-cfg-boot)
 (princ "\n流道线偏移+裁剪+圆角+封口+螺丝孔+倒角+假体+热咀工具 v10.6 已加载(分流板专用; 多模板 通用/矩形; 假体默认传统逐步, 参数框勾选「包络法」切换; 参数默认值外置 ini+记忆)。")
-(princ "\n用法1: 输入 OFF 执行完整流程(弹出参数框, 确定后开始)。")
-(princ "\n用法2: 输入 PARAM 弹出参数设置对话框(只改参数不执行)。")
+(princ "\n用法1: 输入 FLB 执行完整流程(弹出参数框, 确定后开始)。")
+(princ "\n用法2: 输入 FLBPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ "\n用法3: 输入 (dt:trim-all 35.0 \"FLB\") 只做区域裁剪。")
 (princ "\n用法4: 输入 (dt:fillet-all 35.0 \"FLB\") 只做断口圆角。")
 (princ "\n用法5: 输入 (dt:close-channels 35.0 \"FLB\" \"FBX\") 只做通道封口。")
 (princ "\n用法6: 输入 (dt:chamfer-close) 只做封口倒角。")
 (princ "\n用法7: 输入 (dt:drill-holes) 只做螺丝孔定位。")
 (princ "\n用法8: 输入 (dt:fillet-close) 只做假体封口圆角。")
-(princ "\n提示: 出线槽已独立为 slot_runner 脚本(APPLOAD slot_runner.lsp 后输入 SLOT 执行)。")
+(princ "\n提示: 出线槽已独立为 cx_runner 脚本(APPLOAD cx_runner.lsp 后输入 CX 执行)。")
 (princ)

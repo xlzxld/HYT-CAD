@@ -10,7 +10,7 @@
 import re, io, os
 from collections import defaultdict
 
-FILES = ["offset_runner.lsp", "slot_runner.lsp", "jrt_runner.lsp", "size_runner.lsp", "dt_start.lsp"]
+FILES = ["flb_runner.lsp", "cx_runner.lsp", "jrt_runner.lsp", "wx_runner.lsp", "dt_start.lsp"]
 HERE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))  # 审计对象在 scripts\ (2026-08-31 目录分类)
 
 BUILTINS = set("""

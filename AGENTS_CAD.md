@@ -16,9 +16,9 @@
 | 主脚本(分流板) | `offset_runner.lsp`（**v10.6**，2576 行，98 defun，多模板 通用/矩形，命令 OFF/PARAM；假体默认传统逐步, 参数框勾选「包络法」切换) |
 | 出线槽脚本    | `slot_runner.lsp`（**v10.3**，1487 行，68 defun，命令 SLOT/SLOTPARAM；v10.3 起断口圆角函数改名 `dt:slot-fillet-pair`）                                                                                                                                                                                                                                                   |
 | 加热条脚本    | `jrt_runner.lsp`（**v9.14**，2266 行，93 defun，多模板 通用一/通用二，命令 JRT/JRTPARAM）                                                                                                                                                                                                                                                                                |
-| 尺寸测量脚本  | `size_runner.lsp`（**v1.0**，500 行，19 defun，独立第 4 脚本，命令 FLBSZ/FLBSIZE；分流板最长最宽尺寸自动提取、双引擎闭合校验、剪贴板输出、FLB_BOX 标注） |
-| 引导器      | `dt_start.lsp`（**v2.9**，759 行，30 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽/测量数据/工具)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本） |
-| 校验工具     | `tools\check_lisp.py`（按文件名自动区分清单 offset/slot/jrt/dt_start/size：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限）                                                                                                                                                                                                                                                     |
+| 尺寸测量与外协 | `wx_runner.lsp`（**v2.0**，1092 行，39 defun，独立第 4 脚本，命令 FLBSZ/XQG/JD/SJTZ；分流板最长最宽尺寸测量、线切割/精雕全自动年月路径与日期递增出图[已存在09.04则回车追加/输入N自动新建09.04_1]、MText 宽度设限自动折行居中标注、AABB向右平铺排版防覆盖、自动化图层白名单提取、数据图纸交互自由移动与右侧 95mm 间距双列信息文本块无打扰生成） |
+| 引导器      | `dt_start.lsp`（**v3.0**，762 行，30 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽/外协加工/工具)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本） |
+| 校验工具     | `tools\check_lisp.py`（按文件名自动区分清单 offset/slot/jrt/dt_start/wx：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限）                                                                                                                                                                                                                                                     |
 | 审查工具     | `tools\_audit.py`（按自身位置定位 \`..\scripts\ 的 LSP；跨五文件静态审计：①同名不同体函数 ②从未被引用的死函数 ③未声明的全局变量泄漏 ④未使用的形参/局部 ⑤未定义函数引用）                                                                                                                                                                                                                                            |
 | 冲突工具     | `tools\_collide.py`（脚本同名函数冲突检测；跨文件同名必须逐字一致）                                                                                                                                                                                                                                                                                                            |
 | 编码工具     | `tools\make_ansi.py`（**发版必跑**：scripts\ UTF-8 → scripts_ansi\ GBK 副本 + 逐字节读取器模拟校验，供车间 2007~2020 老电脑部署，坑 #64）                                                                                                                                                                                                                                                 |
@@ -27,7 +27,7 @@
 | 历史备份     | 本目录保留全部旧版；更早(v4~v820)在 `C:\Users\5600\WorkBuddy\2026-08-18-16-15-32\autocad-offset-tool\`；多文件试验场(已废弃)在 `Documents\2D3D`、`Documents\dph\autocad`                                                                                                                                                                                                        |
 | 目标平台     | AutoCAD 2024（2007+）；AutoLISP + Visual LISP (COM) + DCL                                                                                                                                                                                                                                                                                                 |
 
-**四脚本架构（2026-09-03 起）**：offset_runner 只画分流板（偏移/裁剪/圆角/封口/螺丝/倒角/假体/热咀/点孔）；slot_runner 只画出线槽（偏移/裁剪/小圆角/延长收头/大圆角/封闭/删源线/CXK 分流）；jrt_runner 只画加热条（LD 偏移/裁剪/端帽/多层嵌套轮廓/多模板）；**size_runner 独立负责尺寸数据测量（分流板最长最宽/双引擎闭合校验/剪贴板写入/FLB_BOX 标注，预留出线槽测量等扩展）**。各脚本**各自自包含**（公共几何库逐字复制），可单独或同时加载——除逐字相同的库函数外，参数表、对话框、dcl 文件、回调函数全部不同名隔离；凡**同名不同体**的函数一律改名隔离（坑 #46）。四个脚本家族在 `dt_start.lsp` 的 `dt:st-families` 统一注册，各对应一个二级菜单，二级菜单内再分布三级子项。
+**四脚本架构（2026-09-03 起，2026-09-04 更名）**：flb_runner(原 offset_runner) 只画分流板（命令 FLB/OFF）；cx_runner(原 slot_runner) 只画出线槽（命令 CX/SLOT）；jrt_runner 只画加热条（LD 偏移/裁剪/端帽/多层嵌套轮廓/多模板）；**wx_runner（原 size_runner）独立负责外协加工与尺寸数据测量（分流板最长最宽/双引擎闭合校验/剪贴板写入/FLB_BOX 标注，线切割/精雕外协自动出图，数据图纸文本块生成）**。各脚本**各自自包含**（公共几何库逐字复制），可单独或同时加载——除逐字相同的库函数外，参数表、对话框、dcl 文件、回调函数全部不同名隔离；凡**同名不同体**的函数一律改名隔离（坑 #46）。四个脚本家族在 `dt_start.lsp` 的 `dt:st-families` 统一注册，各对应一个二级菜单，二级菜单内再分布三级子项。
 
 **核心原则**：纯 COM 几何操作（`vla-*`/`vlax-*`），不调 CAD 命令（`command` 仅 UNDO 分组）。
 
@@ -136,7 +136,7 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 0 弹参数框/选模板(v9.8 多模板) → 1 检查 LD 层 → 2 建 JRT 层(黄2)+清上轮产物 → 3 检查 RZ 层(无→警告，端头全部退化为直线帽) → 4 **端帽统一判定**(`dt:jrt-decide`，各层共用)：自由端头(端点不落在其他 LD 线上)逐一算 `gap = 本LD线与不相交LD线的最小轴线距 − 2×偏移值`，|gap−偏移值|≤1 且匹配到 RZ → 圆帽；否则直线帽；gap 过近 → 告警+直线帽 → 5 **多层构建**(`dt:jrt-build`，k=0..N)：每层 = 偏移 LD→JRT → LD±半宽带状裁剪(仅本层实体，eName 快照差集隔离) → 端帽(圆帽=RZ圆心整圆R=半宽+侧线修到切点；直线帽=LD端点平面向内偏 inset 画帽线+侧线端头修到帽平面) → 统一断口圆角(交汇断口+帽角同一套 jrt-fillet-pair) → 零长残段清理 → 6 统计。**不读 FBX**：全部几何由 LD+RZ 推导。参数：jrt_fillet_r 19(内层逐层+step=同心弧)、jrt_cap_r 29(≥半宽时封闭线=相切圆弧)、jrt_inner_count 2(层数=次数+1)；默认自洽 40−11=29=半宽。
 
-### 4.4 `c:FLBSZ` / `c:FLBSIZE`（size_runner v1.0，独立测量脚本）
+### 4.4 `c:FLBSZ` / `c:FLBSIZE`（wx_runner v2.0，外协与独立测量脚本）
 
 0 探测 FLB 图层(无/空→提示并转入第1步) → 0.5 检验闭合(双引擎：vla-AddRegion + 端点 0.5mm 拓扑度数；闭合→直达第2步，未闭合→提示并转入第1步) → 1 手动选线(ssget 选线，ESC/空选取消退出；闭合校验通过→第2步，未闭合→弹窗提示并取消退出) → 2 计算外包尺寸(AABB+OBB 最小外接矩形计算，求最长与最宽) → 3 自动复制剪贴板(如 350x180) + 命令行打印 + 结果弹窗 → 4 询问是否绘图(选择 Y 在 FLB_BOX 绘制包络矩形与长宽标注，字高≥15)。
 
@@ -167,7 +167,7 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 - 对话框(1386-1528)：dcl-lines(v9.9 按模板动态生成)/write-dcl/find-dcl/get-num/param-reset/param-apply/param-dialog/c:PARAM
 - c:OFF(2218，含局部 *error*)
 
-### 6.4 size_runner v1.0（19 defun，独立尺寸测量脚本）
+### 6.4 wx_runner v2.0（39 defun，外协加工与尺寸测量脚本）
 - 自包含基础几何库：dt:ms/dt:ss->list/dt:ensure-layer/dt:rect-bb-pts/dt:rect-bbox/dt:sz-curve-p/dt:sz-curves-only
 - 测量核心引擎：dt:sz-copy-clip(ActiveX+clip.exe双通道)/dt:sz-curve-sample-pts/dt:sz-curve-angle/dt:sz-uniq-angles/dt:sz-rot-pt/dt:sz-check-closed(双引擎: ACIS Region + 端点0.5mm拓扑度数)/dt:sz-calc-box(AABB+OBB最佳包络)/dt:sz-fmt-num/dt:sz-draw-box-dim(FLB_BOX 字高15)
 - 命令接口：c:FLBSZ / c:FLBSIZE
@@ -274,7 +274,12 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 | 全部 | **编码补丁 2026-08-31** | **用户 2007 实测加载报「输入中的点位置不正确」, 定案坑 #64**: ≤2020 的 MBCS(GBK) LISP 读取器读 UTF-8 文件必炸(双字节吞字符, 报错位置与真实问题无关)。新增 `tools\make_ansi.py` 发版工具 + `scripts_ansi\` GBK 副本目录(说明.txt 同目录), §2.3 兼容表改双轨: 2007~2020 用 GBK 副本 / 2021+ 用 UTF-8 原版; 代码零改动(仅注释/提示文字 4 个符号替换) |
 | 全部 | **低版本补丁 + 2007 实测 2026-08-31** | **2007 上 DTINSTALL 报「参数类型错误: stringp nil」, 定案坑 #65**: 与编码无关(两份 dt_start.lsp 逻辑逐字相同, 仅注释装饰符号差异), 根因是 getvar 静默 nil, 见上方 v2.9 条目。**修完用户 2007 实测通过**: GBK 副本 APPLOAD → DTINSTALL 一次成功 → 三脚本加载 + 顶栏菜单挂出。至此 2007~2026 全链路打通(2007 无 TRUSTEDPATHS, 安装时打印"无(老版本, 跳过)"属正常) |
 | size | **v1.0** | **新增独立尺寸测量脚本 (size_runner.lsp v1.0, 500行, 19 defun)**：架构解耦，建立第 4 独立脚本，与 offset/slot/jrt 形成 4 家族等价架构。支持：①FLB 图层自动探测与提取；②双引擎闭合判定(vla-AddRegion + 0.5mm 容差端点拓扑度数)；③未闭合自动转入手动框选模式，手动选线未闭合明确告警并取消；④AABB+OBB 最佳外接矩形求最长与最宽；⑤自动写入 Windows 剪贴板(如 350x180)；⑥交互式确认后在 FLB_BOX 专用图层绘制外包矩形及字高≥15 的长宽标注；⑦顶栏菜单在出线槽之后挂载「测量数据(&M) ▸ 测量分流板(&F)」 |
+| wx | **v2.0** | **升级外协加工与数据测量工具箱 (wx_runner.lsp v2.0, 1092行, 39 defun)**：更名自 size_runner，架构融合，支持：①线切割出图 (c:XQG)：FLB 双引擎闭合检测/手动框选，全自动按当前系统年月生成子目录与日期命名 (如 26\09\09.04.dwg)，已存在时回车默认追加平铺/输入N自动递增新建 09.04_1.dwg，免弹窗直达目标，AABB 向右平铺(50mm 间距)防覆盖，MText 宽度设限自动折行(2~X行)居中标注原图纸名；②精雕出图 (c:JD)：仅提取热流道脚本生成的自动化图层白名单曲线 (FLB, LS, RZ, DK, JRT)，彻底排除 CX/JT/FBX 等无关曲线，同规则自动命名/递增克隆至精雕目标 DWG 并向右平铺，MText 折行标注图纸名(宋仿黑/Standard 字体探测降级)；③数据图纸 (c:SJTZ)：白名单图层提取，支持鼠标自由拖动或输入位移交互式复制，图形右侧+30 处生成规范化双列信息文本块，列间距扩大至 95mm 彻底消除重叠，无空格系统日期 (YYYY.M.D)，客户/中心距/热咀/出线留空不弹窗打扰；④新增 `wx_runner.ini` 配置文件支持自定义各分支保存根路径 |
+| dt_start | **v3.0** | **顶栏二级菜单重构 (dt_start.lsp v3.0, 762行, 30 defun)**：将「测量数据(&M)」升级为「外协加工(&W)」，下挂 4 个三级子项：测量分流板(&F) / 线切割(&W) / 精雕(&J) / 数据图纸(&D) |
 | offset | v10.6 | 纯洁分流板生成职责，剥离测量逻辑，维持 2576 行，98 defun |
+| flb | **v10.7** | **全系统名称对齐重命名 (flb_runner.lsp v10.7, 2582行, 100 defun)**：offset_runner.* 更名为 flb_runner.* (lsp/ini/dcl/mem)；主命令升级为 FLB/FLBPARAM，保留 c:OFF 与 c:PARAM 兼容别名；内部函数与变量全面迁移为 dt:flb-* 与 *dt-flb-*；引导器菜单宏与检查清单同步对齐 |
+| cx | **v10.4** | **全系统名称对齐与参数修复 (cx_runner.lsp v10.4, 1498行, 70 defun)**：slot_runner.* 更名为 cx_runner.* (lsp/ini/dcl/mem)；主命令升级为 CX/CXPARAM，保留 c:SLOT 与 c:SLOTPARAM 兼容别名；内部函数与变量迁移为 dt:cx-* 与 *dt-cx-*；修复 DCL 控件 key 遗留为 slot_* 导致的参数框不显示与恢复默认失效，全量对齐为 cx_* |
+| wx | **v2.1** | **外协加工与数据图纸全量体验加固 (wx_runner.lsp v2.1, 1102行, 41 defun)**：①平铺间距翻倍至 150.0mm；②线切割与精雕字高设为 15.0；③新增 `dt:sz-format-multiline`，解决工业连字符文件名 (如 SL-26142-RLD-PC+ABS-9.1) 无空格时不自动折行的问题，按符号断句并注入 \P 实现多行居中；④彻底根除「读取形文件 simsun.ttc 时出错」：严禁 put-fontfile 绑定 ttc 路径，改用 COM 原生 vla-setfont 134/34 绑定宋体，大字体兜底；⑤首图新建 was-closed 标 T，确保保存后物理关闭刷盘，首张图纸上方立刻带文字；⑥数据图纸 c:SJTZ 重构为单一整体 vla-addmtext 多行文字图元，双击可一次性直接修改所有空缺数据 |
 
 
 ## 10. 已知坑 / 经验教训（v9.x 新增；v1.0~v8.16 的 28 条详见 `offset_runner_v816.lsp` 文件头，核心条目仍有效：纯 COM/求交用 vla-intersectwith/BOM 编码/无默认参数/圆弧端点只读/切点沿曲线/劣弧/vla-offset 继承图层/eName 比较/延长方向指向线外/边遍历边删/括号 stack 校验）
@@ -315,6 +320,9 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
    - `DTINSTALL` 顺序改为：先加支持路径 → 再写钩子 → 再处理 TRUSTEDPATHS（顺序错了兜底那份就不会被搜到）。
    - **门禁**：`python tools\check_sysvars.py` —— 版本相关变量未走 `dt:st-gets`/`dt:st-hasvar` 即报警，且 getvar 结果直接作 strcat/strlen 实参即报警。反向验证有效：v2.8 命中 5 处风险（正好覆盖三个根因），v2.9 全过。
    - **排查心法**：老版本上出现 `参数类型错误: stringp nil`，先怀疑"系统变量返回 nil"，而不是崩溃点那一行代码本身 —— 报错位置与根因常常不在同一个函数。用 `DTDBG` 的 `[0z]` 段一眼看清哪些变量本版本没有。
+
+66. **TrueType 字体严禁使用 `vla-put-fontfile` 绑定 `.ttc`/`.ttf` 路径**（2026-09-04 用户报错实测）：AutoCAD 的 `FontFile` 属性**专用于 SHX 形文件**。若将系统字体文件路径（如 `C:\Windows\Fonts\simsun.ttc`）赋值给 `FontFile`，AutoCAD 在模型重生成 (REGEN) 时会强行以 SHX 二进制头解析，报错「读取形文件 ... simsun.ttc 时出错」，并使文字样式退化为空心线框甚至干扰视口图元。**正确做法**：使用 AutoCAD COM 原生接口 `(vla-setfont st "宋体" :vlax-false :vlax-false 134 34)`（字符集 134=GB2312, 34=变宽），绝不触碰 `FontFile`；降级时再赋给 `txt.shx` + `gbcbig.shx`。
+67. **AutoCAD MText 遇到无空格的长连字符串绝不自动断行**（2026-09-04 用户出图实测）：工业零件与图纸命名（如 `SL-26142-RLD-PC+ABS-9.1`）通常用 `-`、`_`、`+` 连接，全串无空格。AutoCAD MText 引擎将无空格字符串视作单一「单词」，宁可宽度溢出也绝不断开。**解决**：编写 LISP 智能断句函数（`dt:sz-format-multiline`），检测长串并在符号处分段、主动注入 MText 原生换行符 `\P`；配合 `acAttachmentPointBottomCenter`（底部居中）实现多行严格居中悬停于工件正上方。同时，后台新建目标图纸时必须设 `was-closed T`，确保图元文字写入后 `vla-close` 物理刷盘，否则首图在磁盘未闭合滞留于内存不可见。
 
 ## 11. 接手流程
 
