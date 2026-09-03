@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 三脚本 + 引导器 静态审计(第二版)
   1) 同名不同体函数(多脚本同加载互相覆盖, 坑 #46)
@@ -10,7 +10,7 @@
 import re, io, os
 from collections import defaultdict
 
-FILES = ["offset_runner.lsp", "slot_runner.lsp", "jrt_runner.lsp", "dt_start.lsp"]
+FILES = ["offset_runner.lsp", "slot_runner.lsp", "jrt_runner.lsp", "size_runner.lsp", "dt_start.lsp"]
 HERE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))  # 审计对象在 scripts\ (2026-08-31 目录分类)
 
 BUILTINS = set("""

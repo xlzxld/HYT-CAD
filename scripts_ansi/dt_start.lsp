@@ -78,7 +78,8 @@
 (setq dt:st-families
       (list (list "offset_runner" "分流板" "OFF" "PARAM" "F")
             (list "jrt_runner" "加热条" "JRT" "JRTPARAM" "J")
-            (list "slot_runner" "出线槽" "SLOT" "SLOTPARAM" "C")))
+            (list "slot_runner" "出线槽" "SLOT" "SLOTPARAM" "C")
+            (list "size_runner" "测量数据" "FLBSZ" nil "M")))
 
 (setq dt:st-version "v2.9")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
@@ -473,7 +474,9 @@
                   (if dt:st-dir dt:st-dir "(未定位)")
                   "\n\n命令清单:"))
   (foreach fam dt:st-families
-    (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 画图 / " (cadddr fam) " 参数")))
+    (if (cadddr fam)
+      (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 画图 / " (cadddr fam) " 参数"))
+      (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 测量分流板(长宽/下料/标注)"))))
   (setq s (strcat s "\n  工具: DTRELOAD 刷新 / DTINSTALL 安装 / DTUNINSTALL 卸载 / DTDBG 诊断"))
   (alert s)
   (princ))
@@ -549,12 +552,17 @@
        (progn
          (setq popMain (vla-add pops dt:st-menutitle)
                idx 0)
-         ;; 各脚本家族: 二级子菜单(画X / X参数)
+         ;; 各脚本家族: 二级子菜单(分流板/加热条/出线槽/测量数据)
          (foreach fam dt:st-families
            (setq zh (cadr fam) mc (caddr fam) pc (cadddr fam) hk (nth 4 fam))
            (setq sub (vla-addsubmenu popMain idx (strcat zh "(&" hk ")")))
-           (vla-addmenuitem sub 0 (strcat "画" zh "(&D)") (dt:st-macro (strcat "(c:" mc ")")))
-           (vla-addmenuitem sub 1 (strcat zh "参数(&P)") (dt:st-macro (strcat "(c:" pc ")")))
+           (if pc
+             (progn
+               (vla-addmenuitem sub 0 (strcat "画" zh "(&D)") (dt:st-macro (strcat "(c:" mc ")")))
+               (vla-addmenuitem sub 1 (strcat zh "参数(&P)") (dt:st-macro (strcat "(c:" pc ")"))))
+             (progn
+               ;; 测量数据三级项: 测量分流板 (预留后续扩展测量出线槽等)
+               (vla-addmenuitem sub 0 "测量分流板(&F)" (dt:st-macro (strcat "(c:" mc ")")))))
            (setq idx (1+ idx)))
          ;; 工具子菜单
          (vla-addseparator popMain idx)

@@ -1,0 +1,40 @@
+# ============================================================================
+# Git 排除文件 (.gitignore) - 热流道自动化 CAD 项目
+# ============================================================================
+
+# 1. 编译缓存与临时产物
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+*.bak
+*.bk1
+*.bk2
+
+# 2. AutoCAD 运行态与临时锁定文件
+*.dwl
+*.dwl2
+*.sv$
+*.ac$
+*.dmp
+*.err
+*.log
+
+# 3. 操作系统与文件管理器产物
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+
+# 4. 编辑器与 IDE 配置
+.vscode/
+.idea/
+*.swp
+*~
+
+# 5. 历史会话临时工作目录
+.workbuddy/
+.zcode/
+scratch/
+test/
+temp/

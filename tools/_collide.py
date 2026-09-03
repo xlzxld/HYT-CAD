@@ -1,9 +1,9 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """跨文件同名函数冲突分析: 提取每个 lsp 的 (函数名 -> 规范化函数体哈希),
 找出在多个文件中定义且函数体不一致的名字(后加载覆盖先加载的隐患)。"""
 import re, hashlib
 
-FILES = ['offset_runner.lsp', 'slot_runner.lsp', 'jrt_runner.lsp', 'dt_start.lsp']  # 2026-08-31 目录分类: 与本工具同移 tools\, 分析对象在 ..\scripts
+FILES = ['offset_runner.lsp', 'slot_runner.lsp', 'jrt_runner.lsp', 'size_runner.lsp', 'dt_start.lsp']  # 2026-08-31 目录分类: 与本工具同移 tools\, 分析对象在 ..\scripts
 
 def extract(path):
     text = open(path, encoding='utf-8-sig').read()

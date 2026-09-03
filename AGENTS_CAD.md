@@ -11,22 +11,23 @@
 
 | 项        | 内容                                                                                                                                                                                                                                                                                                                                                     |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 工作目录     | `C:\Users\5600\Documents\ZDH\CAD\`（2026-08-30 发版并分类：**`scripts\` = 4 .lsp + 3 ini + 运行生成物(mem/dcl)一个运行单位**；`tools\` = check_lisp/\_audit/\_collide/make_ansi；根目录 = 两份 md。自启钩子指向 scripts\dt_start.lsp。`test\` 空壳已废弃。2026-08-31 新增 `scripts_ansi\` = 发版工具生成的 GBK 编码副本(供 2007~2020, 不在支持路径上, 属"同一份脚本的另一编码"而非第二在用副本, 不违反坑 #35——坑 #35 禁的是支持路径上的多份同名 .lsp) ) |
+| 工作目录     | `C:\Users\5600\Documents\ZDH\CAD\`（2026-08-30 发版并分类：**`scripts\` = 5 .lsp + 3 ini + 运行生成物(mem/dcl)一个运行单位**；`scripts_ansi\` = 5 个老版本 GBK 编码脚本副本(供 2007~2020 老电脑使用, 坑 #64)；`tools\` = check_lisp/\_audit/\_collide/make_ansi；根目录 = 两份 md。自启钩子指向 scripts\dt_start.lsp） |
 | 改前备份     | 无固定目录（原 test\pc\ 已随发版删除）——改动前自行 `cp` 原件到临时位置, 用完即删, **勿在 CAD\ 内留第二份 .lsp**（坑 #35/#49 多副本误载）                                                                                                                                                                                                                                                            |
-| 主脚本(分流板) | `offset_runner.lsp`（**v10.6**，2576 行，98 defun，多模板 通用/矩形，命令 OFF/PARAM；假体默认传统逐步, 参数框勾选「包络法」切换)                                                                                                                                                                                                                                                           |
+| 主脚本(分流板) | `offset_runner.lsp`（**v10.6**，2576 行，98 defun，多模板 通用/矩形，命令 OFF/PARAM；假体默认传统逐步, 参数框勾选「包络法」切换) |
 | 出线槽脚本    | `slot_runner.lsp`（**v10.3**，1487 行，68 defun，命令 SLOT/SLOTPARAM；v10.3 起断口圆角函数改名 `dt:slot-fillet-pair`）                                                                                                                                                                                                                                                   |
 | 加热条脚本    | `jrt_runner.lsp`（**v9.14**，2266 行，93 defun，多模板 通用一/通用二，命令 JRT/JRTPARAM）                                                                                                                                                                                                                                                                                |
-| 引导器      | `dt_start.lsp`（**v2.9**，751 行，30 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本）                                                                                                                                    |
-| 校验工具     | `tools\check_lisp.py`（按文件名自动区分清单 offset/slot/jrt/dt_start：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限）                                                                                                                                                                                                                                                     |
-| 审查工具     | `tools\_audit.py`（按自身位置定位 \`..\scripts\ 的 LSP；跨四文件静态审计：①同名不同体函数 ②从未被引用的死函数 ③未声明的全局变量泄漏 ④未使用的形参/局部 ⑤未定义函数引用）                                                                                                                                                                                                                                            |
+| 尺寸测量脚本  | `size_runner.lsp`（**v1.0**，500 行，19 defun，独立第 4 脚本，命令 FLBSZ/FLBSIZE；分流板最长最宽尺寸自动提取、双引擎闭合校验、剪贴板输出、FLB_BOX 标注） |
+| 引导器      | `dt_start.lsp`（**v2.9**，759 行，30 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽/测量数据/工具)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本） |
+| 校验工具     | `tools\check_lisp.py`（按文件名自动区分清单 offset/slot/jrt/dt_start/size：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限）                                                                                                                                                                                                                                                     |
+| 审查工具     | `tools\_audit.py`（按自身位置定位 \`..\scripts\ 的 LSP；跨五文件静态审计：①同名不同体函数 ②从未被引用的死函数 ③未声明的全局变量泄漏 ④未使用的形参/局部 ⑤未定义函数引用）                                                                                                                                                                                                                                            |
 | 冲突工具     | `tools\_collide.py`（脚本同名函数冲突检测；跨文件同名必须逐字一致）                                                                                                                                                                                                                                                                                                            |
-| 编码工具     | `tools\make_ansi.py`（**发版必跑**：scripts\ UTF-8 → scripts_ansi\ GBK 副本 + 逐字节读取器模拟校验，供 2007~2020 部署，坑 #64）                                                                                                                                                                                                                                                 |
+| 编码工具     | `tools\make_ansi.py`（**发版必跑**：scripts\ UTF-8 → scripts_ansi\ GBK 副本 + 逐字节读取器模拟校验，供车间 2007~2020 老电脑部署，坑 #64）                                                                                                                                                                                                                                                 |
 | 兼容门禁     | `tools\check_sysvars.py`（**发版必跑**：系统变量读取的「nil 泄漏」静态门禁——版本相关变量(TRUSTEDPATHS/SECURELOAD/ROAMABLEROOTPREFIX/LOCALROOTPREFIX/DWGPREFIX…)必须走 `dt:st-gets`/`dt:st-hasvar`，且 getvar 结果不得直接作 strcat/strlen 实参；坑 #65。反向验证：v2.8 命中 5 处风险，v2.9 全过）                                                                                                                |
 | 版本命名     | 每次改动交付 `*_v<N><M>.lsp`（去点：v9.5→`_v95`）；v9.9 之后进 v10→`_v10`。**正式投用版无版本后缀**（`offset_runner.lsp` 等），dt_start 优先加载正式版                                                                                                                                                                                                                                      |
 | 历史备份     | 本目录保留全部旧版；更早(v4~v820)在 `C:\Users\5600\WorkBuddy\2026-08-18-16-15-32\autocad-offset-tool\`；多文件试验场(已废弃)在 `Documents\2D3D`、`Documents\dph\autocad`                                                                                                                                                                                                        |
 | 目标平台     | AutoCAD 2024（2007+）；AutoLISP + Visual LISP (COM) + DCL                                                                                                                                                                                                                                                                                                 |
 
-**三脚本架构（v9.0 起）**：offset_runner 只画分流板（偏移/裁剪/圆角/封口/螺丝/倒角/假体/热咀/点孔）；slot_runner 只画出线槽（偏移/裁剪/小圆角/延长收头/大圆角/封闭/删源线/CXK 分流）；jrt_runner 只画加热条（LD 偏移/裁剪/端帽/多层嵌套轮廓/多模板）。各脚本**各自自包含**（公共几何库逐字复制），可单独或同时加载——除逐字相同的库函数外，参数表(`dt:param-table`/`dt:slot-param-table`/`dt:jrt-param-table`)、对话框(`dt_param`/`dt_slot_param`/`jrt_param`)、dcl 文件、回调函数全部不同名隔离；slot 的 fillet-pair 多 nochk 第7参、write-dcl 各写各的 dcl 源，故凡**同名不同体**的函数一律改名隔离（jrt 侧 `dt:jrt-fillet-pair`/`dt:jrt-cut-curve`/`dt:jrt-trim-curve`，slot 侧 `dt:slot-write-dcl`；坑 #46）。
+**四脚本架构（2026-09-03 起）**：offset_runner 只画分流板（偏移/裁剪/圆角/封口/螺丝/倒角/假体/热咀/点孔）；slot_runner 只画出线槽（偏移/裁剪/小圆角/延长收头/大圆角/封闭/删源线/CXK 分流）；jrt_runner 只画加热条（LD 偏移/裁剪/端帽/多层嵌套轮廓/多模板）；**size_runner 独立负责尺寸数据测量（分流板最长最宽/双引擎闭合校验/剪贴板写入/FLB_BOX 标注，预留出线槽测量等扩展）**。各脚本**各自自包含**（公共几何库逐字复制），可单独或同时加载——除逐字相同的库函数外，参数表、对话框、dcl 文件、回调函数全部不同名隔离；凡**同名不同体**的函数一律改名隔离（坑 #46）。四个脚本家族在 `dt_start.lsp` 的 `dt:st-families` 统一注册，各对应一个二级菜单，二级菜单内再分布三级子项。
 
 **核心原则**：纯 COM 几何操作（`vla-*`/`vlax-*`），不调 CAD 命令（`command` 仅 UNDO 分组）。
 
@@ -116,12 +117,14 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 | CX    | 出线槽    | 蓝 5  | 源线+通道壁+圆角弧+封闭线同层（slot_runner 管理）     |
 | CXK   | 出线口封闭线 | 蓝 5  | v9.9：距 DP 最远的那条封闭线自动分流到此层（slot 创建）   |
 | JRT   | 加热条    | 黄 2  | 多层嵌套轮廓+端帽同层（jrt_runner 管理；纯产物层，重跑全清） |
+| JRTDW | — | 通用二加热条的定位源线 | 你画 |
+| FLB_BOX | 分流板外包矩形及标注 | 青 4 | 分流板最长最宽包络参考框与字高 15 线性标注（FLBSZ 管理） |
 
 > `ensure-layer`（offset/jrt）对已存在但大小写不一致的图层自动改名纠正（如 dp→DP；AutoCAD 图层名不区分大小写，坑 #29）。CXK 由 slot 内联创建（无 ensure-layer）。
 
 ## 4. 完整流程
 
-### 4.1 `c:OFF`（offset_runner v10.6，行 2340；v9.8 起先弹**模板选择框**[通用/矩形]，取消中止）
+### 4.1 `c:OFF`（offset_runner v10.7，行 2340；v9.8 起先弹**模板选择框**[通用/矩形]，取消中止）
 
 0 选模板(**通用**=下述现状全流程，行为零变化；**矩形**=`dt:rect-process` 自管全流程，见 §7) → 0.5 弹参数框(取消中止；v9.9 起按模板动态显示参数键) → 1 检查 LD 层 → 2 全选 → 3 建 8 层(FLB/FBX/LS/JT/JTFBX/RZ/DK/DP) → 3.5 清理旧产物(含 RZ/DK；**不清 DP、不清 CX**) → 4 偏移35→FLB → 5 裁剪 → 6 断口圆角R15 → 7 通道封口→FBX → **7.5 热咀+点孔圆**(RZ/DK，须在倒角前：倒角后 FBX 混入斜线无法按层识别) → 8 螺丝孔(单圆，必须在倒角前) → 9 倒角 → **9.5 FBX 并入 FLB 并删层**(v9.1) → **10~15.5 假体(v10.2 包络法，见 §7；FLB 为空/外扩量过小时回退旧五步：LD偏移50→带状裁剪→断口圆角→延长15→端点封口→封口圆角→并层)** → 17 统计。（以上大括号前为通用模板流程，行号参考）
 
@@ -132,6 +135,10 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 ### 4.3 `c:JRT`（jrt_runner v9.14，行 2182；`dt:jrt-build`(1326)/`dt:jrt-decide`(1065)）
 
 0 弹参数框/选模板(v9.8 多模板) → 1 检查 LD 层 → 2 建 JRT 层(黄2)+清上轮产物 → 3 检查 RZ 层(无→警告，端头全部退化为直线帽) → 4 **端帽统一判定**(`dt:jrt-decide`，各层共用)：自由端头(端点不落在其他 LD 线上)逐一算 `gap = 本LD线与不相交LD线的最小轴线距 − 2×偏移值`，|gap−偏移值|≤1 且匹配到 RZ → 圆帽；否则直线帽；gap 过近 → 告警+直线帽 → 5 **多层构建**(`dt:jrt-build`，k=0..N)：每层 = 偏移 LD→JRT → LD±半宽带状裁剪(仅本层实体，eName 快照差集隔离) → 端帽(圆帽=RZ圆心整圆R=半宽+侧线修到切点；直线帽=LD端点平面向内偏 inset 画帽线+侧线端头修到帽平面) → 统一断口圆角(交汇断口+帽角同一套 jrt-fillet-pair) → 零长残段清理 → 6 统计。**不读 FBX**：全部几何由 LD+RZ 推导。参数：jrt_fillet_r 19(内层逐层+step=同心弧)、jrt_cap_r 29(≥半宽时封闭线=相切圆弧)、jrt_inner_count 2(层数=次数+1)；默认自洽 40−11=29=半宽。
+
+### 4.4 `c:FLBSZ` / `c:FLBSIZE`（size_runner v1.0，独立测量脚本）
+
+0 探测 FLB 图层(无/空→提示并转入第1步) → 0.5 检验闭合(双引擎：vla-AddRegion + 端点 0.5mm 拓扑度数；闭合→直达第2步，未闭合→提示并转入第1步) → 1 手动选线(ssget 选线，ESC/空选取消退出；闭合校验通过→第2步，未闭合→弹窗提示并取消退出) → 2 计算外包尺寸(AABB+OBB 最小外接矩形计算，求最长与最宽) → 3 自动复制剪贴板(如 350x180) + 命令行打印 + 结果弹窗 → 4 询问是否绘图(选择 Y 在 FLB_BOX 绘制包络矩形与长宽标注，字高≥15)。
 
 ## 5. 参数表
 
@@ -146,7 +153,7 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 ## 6. 函数清单
 
 
-### 6.1 offset_runner v10.6（98 defun；行号为 v9.6 时代参考，v9.8+ 新增函数以 grep 为准）
+### 6.1 offset_runner v10.6（98 defun）
 - 工具(104-310)：dist/flat->pts/inters-pts/ss->list/ms/layer-vlas/poly-pts/point-on-line/uniq/excluded-p/**curve-p/curves-only(v10.6 非曲线实体过滤)**/norm-angle/in-zone/unit/pt+vec/acos/tan/angle-between/not-parallel/arc-covers/end-infos/set-endpoint/endpoint-in
 - **参数配置与记忆(v10.1, 139-260)**：off-cfg-dir/off-cfg-kv(off-cfg-read(distof 校验 INI 解析)/off-cfg-sec/off-cfg-get/**off-param-default(cfg→模板表→caddr 三级)**/off-cfg-gen(带注释生成 ini)/**off-mem-save(按模板保存)**/**off-cfg-boot(文件尾调用: 生成缺失 ini+恢复上次模板/值)**；全局 \*dt-off-cfg\*/\*dt-off-mem\*
 - 切割链(326-493)：cut-params(v10.6 getparamatpoint 剔 nil)/seg-mid/rebuild-seg/cut-curve(统一驱动: nil=打断/TRIM=裁剪)/poly-rebuild/trim-curve/cross-points(**v10.6 包围盒预过滤**: bbox 不相交跳过 intersectwith, 复用 dt:rect-bbox)/trim-all
@@ -154,12 +161,16 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 - 封口(673-788)：end-free/pick-pair/close-pair/same-pair/make-close-line/close-channels
 - 倒角+热咀+假体(790-1150)：collect-plate-ends/find-touch/**nozzle-circles(820)**/add-close-line/mark-fail/chamfer-one/chamfer-close/near-center-end/extend-ends/fillet-close-one/fillet-close
 - 图层偏移(1151-1299)：ensure-layer(大小写纠正, **1471**)/purge-layer/**merge-layer(1506)**/offset-enames/offset-layer/offset-inward
-  - ~~dt:fix-layer-case~~ **v10.2d 删除**：定义后从未被调用的死函数
 - 螺丝(1300-1384)：add-screw(1302 单圆)/drill-holes
 - **多模板(v9.8~v10.0)**：off-template-table(**1853**, 通用/矩形, 矩形 process 级覆盖)/off-template-row(1894)/**rect-bb-pts(2006, boundingbox 的 variant/safearray 双兼容)**/**dt:rect-bbox(2012, 对象列表→包络盒)**/**dt:rect-process(2120)**/**dt:off-param-labels(1875)**
 - **假体包络法(v10.2, 1348 起)**：**dt:jt-build(1410, FLB 包络盒外扩 hole_dist−offset_dist 圆角矩形, 复用 dt:rect-bbox；v10.2d 起圆角上限与 rect-jt 同为 0.45×短边)**/dt:jt-line(1462)
 - 对话框(1386-1528)：dcl-lines(v9.9 按模板动态生成)/write-dcl/find-dcl/get-num/param-reset/param-apply/param-dialog/c:PARAM
 - c:OFF(2218，含局部 *error*)
+
+### 6.4 size_runner v1.0（19 defun，独立尺寸测量脚本）
+- 自包含基础几何库：dt:ms/dt:ss->list/dt:ensure-layer/dt:rect-bb-pts/dt:rect-bbox/dt:sz-curve-p/dt:sz-curves-only
+- 测量核心引擎：dt:sz-copy-clip(ActiveX+clip.exe双通道)/dt:sz-curve-sample-pts/dt:sz-curve-angle/dt:sz-uniq-angles/dt:sz-rot-pt/dt:sz-check-closed(双引擎: ACIS Region + 端点0.5mm拓扑度数)/dt:sz-calc-box(AABB+OBB最佳包络)/dt:sz-fmt-num/dt:sz-draw-box-dim(FLB_BOX 字高15)
+- 命令接口：c:FLBSZ / c:FLBSIZE
 
 ### 6.2 slot_runner v10.3（68 defun）
 - **参数配置与记忆(v10.1, 36-195)**：slot-cfg-dir/kv/read(v10.3 句柄兜底关闭)/sec/get/**slot-param-default**/slot-cfg-gen/**slot-mem-save**/**slot-cfg-boot**(文件尾)；全局 \*dt-slot-cfg\*/\*dt-slot-mem\*（固定节"参数"）；**dt:slot-param-labels(v10.1 新增, 生成 ini 中文注释)**
@@ -262,6 +273,8 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 | dt_start | **v2.9** | **低版本「参数类型错误: stringp nil」根因修复(坑 #65, 用户 2007 实测 DTINSTALL 报错)**: 老版本 getvar 读本版本没有的变量**静默返回 nil**(非抛异常), nil 流进 strcat/strlen 即炸。新增 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 兼容底座(抛错/nil/非字符串统一返回 ""), 封死三处泄漏点 —— st-trusted-add/del(TRUSTEDPATHS, 2007~2015 命中)、st-acadoc-path + st-write-hook(ROAMABLEROOTPREFIX)、st-locate(DWGPREFIX); st-split 补 null 返回; st-add-support 加 front 参数(支持根不可用时 acaddoc.lsp 兜底写脚本目录并置顶支持路径); DTINSTALL 改序(先加支持路径 → 再写钩子 → 再 TRUSTEDPATHS)并打印 ACADVER/支持根/变量可用性; DTDBG 加 `[0z]` 环境探测段。新增 `tools\check_sysvars.py` 门禁(反向验证: v2.8 命中 5 处风险, v2.9 全过) |
 | 全部 | **编码补丁 2026-08-31** | **用户 2007 实测加载报「输入中的点位置不正确」, 定案坑 #64**: ≤2020 的 MBCS(GBK) LISP 读取器读 UTF-8 文件必炸(双字节吞字符, 报错位置与真实问题无关)。新增 `tools\make_ansi.py` 发版工具 + `scripts_ansi\` GBK 副本目录(说明.txt 同目录), §2.3 兼容表改双轨: 2007~2020 用 GBK 副本 / 2021+ 用 UTF-8 原版; 代码零改动(仅注释/提示文字 4 个符号替换) |
 | 全部 | **低版本补丁 + 2007 实测 2026-08-31** | **2007 上 DTINSTALL 报「参数类型错误: stringp nil」, 定案坑 #65**: 与编码无关(两份 dt_start.lsp 逻辑逐字相同, 仅注释装饰符号差异), 根因是 getvar 静默 nil, 见上方 v2.9 条目。**修完用户 2007 实测通过**: GBK 副本 APPLOAD → DTINSTALL 一次成功 → 三脚本加载 + 顶栏菜单挂出。至此 2007~2026 全链路打通(2007 无 TRUSTEDPATHS, 安装时打印"无(老版本, 跳过)"属正常) |
+| size | **v1.0** | **新增独立尺寸测量脚本 (size_runner.lsp v1.0, 500行, 19 defun)**：架构解耦，建立第 4 独立脚本，与 offset/slot/jrt 形成 4 家族等价架构。支持：①FLB 图层自动探测与提取；②双引擎闭合判定(vla-AddRegion + 0.5mm 容差端点拓扑度数)；③未闭合自动转入手动框选模式，手动选线未闭合明确告警并取消；④AABB+OBB 最佳外接矩形求最长与最宽；⑤自动写入 Windows 剪贴板(如 350x180)；⑥交互式确认后在 FLB_BOX 专用图层绘制外包矩形及字高≥15 的长宽标注；⑦顶栏菜单在出线槽之后挂载「测量数据(&M) ▸ 测量分流板(&F)」 |
+| offset | v10.6 | 纯洁分流板生成职责，剥离测量逻辑，维持 2576 行，98 defun |
 
 
 ## 10. 已知坑 / 经验教训（v9.x 新增；v1.0~v8.16 的 28 条详见 `offset_runner_v816.lsp` 文件头，核心条目仍有效：纯 COM/求交用 vla-intersectwith/BOM 编码/无默认参数/圆弧端点只读/切点沿曲线/劣弧/vla-offset 继承图层/eName 比较/延长方向指向线外/边遍历边删/括号 stack 校验）
@@ -309,8 +322,8 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 2. **改代码**：精确 Edit，replace_all 后必须通读复核（坑 #32）；新代码传参前核对数据格式（坑 #31）；**新增/修改函数后跑 `_audit.py` 核对局部变量声明（坑 #61）**。
 3. **版本**：新文件 `*_v<N><M>.lsp`（正式投用版去后缀），版本号写进 文件头/横幅。
 4. **校验**：`python tools\check_lisp.py scripts\<文件名>`（自动区分 offset/slot/jrt/dt_start 四清单）；**改到系统变量读取时必跑 `python tools\check_sysvars.py`（坑 #65 nil 泄漏门禁）**；深度排查另跑 `python tools\_audit.py`；同名一致性 `python tools\_collide.py`（在 scripts\ 目录下跑）。
-5. **生成编码副本（发版必做）**：`python tools\make_ansi.py` —— 重新生成 `scripts_ansi\` 并自动做逐字节读取器结构校验，2007~2020 机器只认这份；改过 `scripts\` 后要同步重打 `scripts_ansi.zip`（中文文件名需 UTF-8 flag，否则解压出乱码）。
+5. **生成编码副本（发版必做）**：`python tools\make_ansi.py` —— 重新生成 `scripts_ansi\` 并自动做逐字节读取器结构校验，车间 2007~2020 老机器部署只认这份副本；
 6. **文档**：用户明确要求时才更新（默认不动）；CAD 侧改动更新 `AGENTS_CAD.md`/`README_CAD.md`（版本号、行数、defun 数、行号、函数清单、版本历史要同步，否则文档会持续失真）。
-7. **测试**：让用户 APPLOAD（或 DTRELOAD）后跑 OFF/SLOT/JRT；几何问题优先要 **截图+DXF(2007)**，用坑 #33 的复算法定位；对话框/加载类疑难用 DTDBG。
-8. **发布**：2026-08-30 起脚本目录即正式目录（C:\Users\5600\Documents\ZDH\CAD\，test\ 已删除）——在本目录改完、**check_lisp 全绿 + check_sysvars 全过 + make_ansi 生成成功** + 用户 CAD 实测通过即为发布（2007~2020 实测用 scripts_ansi\ 副本覆盖后验证）; .dcl/ini 运行时自管, 无需同步动作。
+7. **测试**：让用户 APPLOAD（或 DTRELOAD）后跑 OFF/SLOT/JRT/FLBSZ；几何问题优先要 **截图+DXF(2007)**，用坑 #33 的复算法定位；对话框/加载类疑难用 DTDBG。
+8. **发布**：2026-08-30 起脚本目录即正式目录（C:\Users\5600\Documents\ZDH\CAD\，test\ 已删除）——在本目录改完、**check_lisp 全绿 + check_sysvars 全过 + make_ansi 生成成功** + 用户 CAD 实测通过即为发布（2007~2020 用 scripts_ansi\ 副本覆盖后验证）; .dcl/ini 运行时自管, 无需同步动作。
 9. **低版本验证清单（2007~2015 尤其要跑）**：① APPLOAD 无「输入中的点位置不正确」（编码，坑 #64）② `DTINSTALL` 无「stringp nil」且打印出 ACADVER/支持根/变量可用性（坑 #65）③ 顶栏菜单出现且点击可执行 ④ OFF/SLOT/JRT 各跑一次 ⑤ 重启 CAD 自动挂载 ⑥ `DTUNINSTALL` 能干净还原。

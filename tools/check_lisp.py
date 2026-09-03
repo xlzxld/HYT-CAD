@@ -142,12 +142,20 @@ DTSTART = ['c:DTINSTALL', 'c:DTRELOAD', 'c:DTUNINSTALL', 'c:DTDBG',
            'dt:st-path-list', 'dt:st-split',
            'dt:st-add-support', 'dt:st-del-support',
            'dt:st-trusted-add', 'dt:st-trusted-del']
+# size_runner 尺寸测量脚本
+SIZE = ['c:FLBSZ', 'c:FLBSIZE', 'dt:sz-copy-clip', 'dt:sz-curve-sample-pts',
+        'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
+        'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
+        'dt:sz-draw-box-dim']
+
 if 'dt_start' in base:
     need = DTSTART
 elif 'slot' in base:
     need = SLOT
 elif 'jrt' in base:
     need = JRT
+elif 'size' in base:
+    need = SIZE
 else:
     need = PLATE
 missing = [n for n in need if '(defun %s' % n not in code]
