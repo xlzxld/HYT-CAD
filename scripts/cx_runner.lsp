@@ -1259,8 +1259,8 @@
          (if (null (tblsearch "LAYER" "CXK"))
            (progn
              (setq lay (vla-add layers "CXK"))
-             (vla-put-color lay 5)
-             (princ "\n【出线槽】已创建新图层 \"CXK\" (蓝色, 放距 DP 最远的封闭线)。")))
+             (vla-put-color lay 150)
+             (princ "\n【出线槽】已创建新图层 \"CXK\" (亮蓝, 放距 DP 最远的封闭线)。")))
          (vla-put-layer best "CXK")
          (princ (strcat "\n【出线槽】距 DP 最远的封闭线(距离 " (rtos best-d 2 2)
                         ")已移入\"CXK\"图层。"))))))

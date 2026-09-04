@@ -20,7 +20,7 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.0
+;;; 版本: v2.2
 ;;; 平台: AutoCAD 2007 ~ 2026 (AutoLISP + COM ActiveX)
 ;;; ============================================================================
 
@@ -30,6 +30,7 @@
 (setq *dt-outsource-target-dwg* nil) ;; 目标汇总图纸通用记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
 (setq *dt-jd-target-dwg* nil)        ;; 精雕目标图纸路径记忆
+(setq *dt-sz-multi-regions* nil)     ;; 多连通域检测状态
 (setq *dt-sjtz-kh* nil)              ;; 数据图纸客户名称记忆
 (setq *dt-sjtz-mj* nil)              ;; 数据图纸模具编号记忆
 (setq *dt-sjtz-zxj* nil)             ;; 数据图纸中心距记忆
@@ -40,6 +41,10 @@
 ;; ============================================================================
 ;; 一、公共几何与环境基础函数 (自包含库, 跨脚本同名逐字一致, 坑 #46)
 ;; ============================================================================
+
+;; AutoLISP 环境补丁: stringp 函数垫片 (原生 AutoLISP 无此函数, 坑 #68)
+(if (null (boundp 'stringp))
+  (defun stringp (x) (= (type x) 'STR)))
 
 ;; 当前文档模型空间(集中获取, 避免各函数重复拼 vla-get 链)
 (defun dt:ms ()
@@ -79,6 +84,17 @@
     (vlax-safearray->list (vlax-variant-value x))
     (vlax-safearray->list x)))
 
+;; 安全解包 variant/safearray/list 坐标点列表
+(defun dt:sz-safe-pts (x)
+  (cond
+    ((null x) nil)
+    ((listp x) x)
+    ((= (type x) 'variant)
+     (vlax-safearray->list (vlax-variant-value x)))
+    ((= (type x) 'safearray)
+     (vlax-safearray->list x))
+    (T nil)))
+
 ;; 对象列表整体范围: 返回 (minx miny maxx maxy), 全部失败返回 nil
 (defun dt:rect-bbox (objs / o mn mx p minx miny maxx maxy)
   (foreach o objs
@@ -106,7 +122,7 @@
                     ((= oname "AcDbLine") "LINE")
                     ((= oname "AcDbArc") "ARC")
                     ((= oname "AcDbPolyline") "LWPOLYLINE")
-                    ((= oname "AcDb2dPolyline") "POLYLINE")
+                    ((or (= oname "AcDb2dPolyline") (= oname "AcDb3dPolyline")) "POLYLINE")
                     ((= oname "AcDbSpline") "SPLINE")
                     ((= oname "AcDbCircle") "CIRCLE")
                     ((= oname "AcDbEllipse") "ELLIPSE")
@@ -148,45 +164,114 @@
   T)
 
 ;; 曲线采样点提取(用于 OBB/AABB 包络范围计算)
-(defun dt:sz-curve-sample-pts (o / oname pts sp ep len)
+(defun dt:sz-curve-sample-pts (o / oname pts sp ep n i pt b cen r)
   (setq pts nil
-        oname (vla-get-objectname o))
-  (cond
-    ((or (= oname "AcDbLine") (= oname "AcDbPolyline"))
-     (setq sp (vlax-curve-getstartpoint o)
-           ep (vlax-curve-getendpoint o))
-     (setq pts (list (list (car sp) (cadr sp))
-                     (list (car ep) (cadr ep)))))
-    (T
-     (setq len (vl-catch-all-apply 'vlax-curve-getdistatparam
-                                  (list o (vlax-curve-getendparam o))))
-     (if (and (not (vl-catch-all-error-p len)) (numberp len) (> len 0.0))
-       (setq pts (list (vlax-curve-getstartpoint o)
-                       (vlax-curve-getpointatdist o (* len 0.25))
-                       (vlax-curve-getpointatdist o (* len 0.5))
-                       (vlax-curve-getpointatdist o (* len 0.75))
-                       (vlax-curve-getendpoint o))
-             pts (mapcar '(lambda (p) (list (car p) (cadr p))) pts))
-       (progn
-         (setq sp (vlax-curve-getstartpoint o)
-               ep (vlax-curve-getendpoint o))
+        oname (vl-catch-all-apply 'vla-get-objectname (list o)))
+  (if (and (not (vl-catch-all-error-p oname)) (= (type oname) 'STR))
+    (cond
+      ((= oname "AcDbLine")
+       (setq sp (vl-catch-all-apply 'vlax-curve-getstartpoint (list o))
+             ep (vl-catch-all-apply 'vlax-curve-getendpoint (list o)))
+       (if (and (not (vl-catch-all-error-p sp)) sp
+                (not (vl-catch-all-error-p ep)) ep)
+         (setq pts (list (list (car sp) (cadr sp))
+                         (list (car ep) (cadr ep))))))
+
+      ((= oname "AcDbCircle")
+       (setq cen (vl-catch-all-apply 'vla-get-center (list o))
+             r   (vl-catch-all-apply 'vla-get-radius (list o)))
+       (if (and (not (vl-catch-all-error-p cen)) cen
+                (not (vl-catch-all-error-p r)) (numberp r))
+         (progn
+           (setq cen (dt:sz-safe-pts cen))
+           (if (and cen (listp cen) (>= (length cen) 2))
+             (setq pts (list (list (- (car cen) r) (cadr cen))
+                             (list (+ (car cen) r) (cadr cen))
+                             (list (car cen) (- (cadr cen) r))
+                             (list (car cen) (+ (cadr cen) r))))))))
+
+      ((= oname "AcDbArc")
+       (setq sp (vl-catch-all-apply 'vlax-curve-getstartpoint (list o))
+             ep (vl-catch-all-apply 'vlax-curve-getendpoint (list o)))
+       (if (and (not (vl-catch-all-error-p sp)) sp
+                (not (vl-catch-all-error-p ep)) ep)
+         (setq pts (list (list (car sp) (cadr sp))
+                         (list (car ep) (cadr ep))))))
+
+      ((or (= oname "AcDbPolyline") (= oname "AcDb2dPolyline"))
+       (setq n (vl-catch-all-apply 'vlax-curve-getendparam (list o)))
+       (if (and (not (vl-catch-all-error-p n)) (numberp n))
+         (progn
+           (setq n (fix (+ n 1e-4)) i 0)
+           (while (<= i n)
+             (setq pt (vl-catch-all-apply 'vlax-curve-getpointatparam (list o i)))
+             (if (and (not (vl-catch-all-error-p pt)) pt)
+               (setq pts (cons (list (car pt) (cadr pt)) pts)))
+             ;; 若当前段是圆弧(bulge != 0)，补充采样圆弧中点保证弧顶包络准确
+             (if (< i n)
+               (progn
+                 (setq b (vl-catch-all-apply 'vla-getbulge (list o i)))
+                 (if (and (not (vl-catch-all-error-p b)) (numberp b) (> (abs b) 1e-4))
+                   (progn
+                     (setq pt (vl-catch-all-apply 'vlax-curve-getpointatparam (list o (+ (float i) 0.5))))
+                     (if (and (not (vl-catch-all-error-p pt)) pt)
+                       (setq pts (cons (list (car pt) (cadr pt)) pts)))))))
+             (setq i (1+ i)))
+           (setq pts (reverse pts)))))
+
+      (T
+       (setq sp (vl-catch-all-apply 'vlax-curve-getstartpoint (list o))
+             ep (vl-catch-all-apply 'vlax-curve-getendpoint (list o)))
+       (if (and (not (vl-catch-all-error-p sp)) sp
+                (not (vl-catch-all-error-p ep)) ep)
          (setq pts (list (list (car sp) (cadr sp))
                          (list (car ep) (cadr ep))))))))
   pts)
 
-;; 提取直线的方向角(归一化到 [0, pi/2))
-(defun dt:sz-curve-angle (o / sp ep dx dy a)
-  (if (= (vla-get-objectname o) "AcDbLine")
-    (progn
-      (setq sp (vlax-curve-getstartpoint o)
-            ep (vlax-curve-getendpoint o)
-            dx (- (car ep) (car sp))
-            dy (- (cadr ep) (cadr sp))
-            a  (atan dy dx))
-      (while (< a 0.0) (setq a (+ a pi)))
-      (while (>= a (/ pi 2.0)) (setq a (- a (/ pi 2.0))))
-      a)
-    nil))
+;; 提取曲线中所有有效直线段的方向角(归一化到 [0, pi/2))
+(defun dt:sz-curve-angles (o / oname angs p1 p2 dx dy a n i b)
+  (setq angs nil
+        oname (vl-catch-all-apply 'vla-get-objectname (list o)))
+  (if (and (not (vl-catch-all-error-p oname)) (= (type oname) 'STR))
+    (cond
+      ((= oname "AcDbLine")
+       (setq p1 (vl-catch-all-apply 'vlax-curve-getstartpoint (list o))
+             p2 (vl-catch-all-apply 'vlax-curve-getendpoint (list o)))
+       (if (and (not (vl-catch-all-error-p p1)) p1
+                (not (vl-catch-all-error-p p2)) p2)
+         (progn
+           (setq dx (- (car p2) (car p1))
+                 dy (- (cadr p2) (cadr p1)))
+           (if (> (+ (* dx dx) (* dy dy)) 1.0)
+             (progn
+               (setq a (atan dy dx))
+               (while (< a 0.0) (setq a (+ a pi)))
+               (while (>= a (/ pi 2.0)) (setq a (- a (/ pi 2.0))))
+               (setq angs (list a)))))))
+      ((or (= oname "AcDbPolyline") (= oname "AcDb2dPolyline"))
+       (setq n (vl-catch-all-apply 'vlax-curve-getendparam (list o)))
+       (if (and (not (vl-catch-all-error-p n)) (numberp n))
+         (progn
+           (setq n (fix n) i 0)
+           (while (< i n)
+             (setq b (vl-catch-all-apply 'vla-getbulge (list o i)))
+             (if (or (vl-catch-all-error-p b) (< (abs b) 1e-4))
+               (progn
+                 (setq p1 (vl-catch-all-apply 'vlax-curve-getpointatparam (list o i))
+                       p2 (vl-catch-all-apply 'vlax-curve-getpointatparam (list o (1+ i))))
+                 (if (and (not (vl-catch-all-error-p p1)) p1
+                          (not (vl-catch-all-error-p p2)) p2)
+                   (progn
+                     (setq dx (- (car p2) (car p1))
+                           dy (- (cadr p2) (cadr p1)))
+                     (if (> (+ (* dx dx) (* dy dy)) 1.0)
+                       (progn
+                         (setq a (atan dy dx))
+                         (while (< a 0.0) (setq a (+ a pi)))
+                         (while (>= a (/ pi 2.0)) (setq a (- a (/ pi 2.0))))
+                         (setq angs (cons a angs))))))))
+             (setq i (1+ i))))))))
+  angs)
 
 ;; 角度列表容差去重
 (defun dt:sz-uniq-angles (angs / r a found x)
@@ -207,7 +292,8 @@
 
 ;; 双引擎闭合区域判定: Engine 1 (Region 面域) + Engine 2 (端点容差拓扑度数)
 (defun dt:sz-check-closed (cands / o oname sa res regs is-closed pts sp ep p clus found r)
-  (setq is-closed nil)
+  (setq is-closed nil
+        *dt-sz-multi-regions* nil)
   (cond
     ((null cands) nil)
     ;; 单图元分支
@@ -223,7 +309,7 @@
              (or (= res :vlax-true) (= res -1) (< res 0))))))
     ;; 多图元分支
     (T
-     ;; 引擎 1: AutoCAD 原生 Region 面域建模引擎
+      ;; 引擎 1: AutoCAD 原生 Region 面域建模引擎
      (setq sa (vlax-make-safearray vlax-vbObject (cons 0 (1- (length cands)))))
      (vlax-safearray-fill sa cands)
      (setq res (vl-catch-all-apply 'vla-addregion (list (dt:ms) sa)))
@@ -232,6 +318,8 @@
          (setq regs (vlax-safearray->list (vlax-variant-value res)))
          (if (and regs (> (length regs) 0))
            (progn
+             (if (> (length regs) 1)
+               (setq *dt-sz-multi-regions* (length regs)))
              (foreach r regs (vl-catch-all-apply 'vla-delete (list r)))
              (setq is-closed T)))))
      ;; 引擎 2: 容差端点拓扑度数判定(0.5mm 容差缝隙匹配)
@@ -274,8 +362,7 @@
         angs (list 0.0))
   (foreach o cands
     (setq all-pts (append (dt:sz-curve-sample-pts o) all-pts))
-    (setq a (dt:sz-curve-angle o))
-    (if a (setq angs (cons a angs))))
+    (setq angs (append (dt:sz-curve-angles o) angs)))
   (setq angs (dt:sz-uniq-angles angs))
 
   (setq best-area nil
@@ -307,7 +394,7 @@
 
   ;; 若 AABB 面积与最佳 OBB 面积相差在 1% 以内，优先采用正交(0.0)
   (if (and aabb-box best-box
-           (<= aabb-area (* (car aabb-box) (cadr aabb-box) 1.01)))
+           (<= aabb-area (* best-area 1.01)))
     (setq best-box aabb-box))
 
   (if best-box
@@ -333,6 +420,38 @@
       (list len wid p1 p2 p3 p4 a))
     nil))
 
+;; 检测图形集合(优先分流板 FLB 轮廓)的倾斜角 (归一化在 [0, pi/2), 0.0 表示正交平行/垂直)
+(defun dt:sz-detect-tilt-angle (cands / flb-cands box a lay)
+  (setq flb-cands (vl-remove-if-not
+                    '(lambda (o / lay)
+                       (setq lay (vl-catch-all-apply 'vla-get-layer (list o)))
+                       (and (not (vl-catch-all-error-p lay))
+                            (= (type lay) 'STR)
+                            (equal (strcase lay) "FLB")))
+                    cands))
+  (if (null flb-cands) (setq flb-cands cands))
+  (setq box (vl-catch-all-apply 'dt:sz-calc-box (list flb-cands)))
+  (if (and (not (vl-catch-all-error-p box)) box (listp box) (>= (length box) 7))
+    (setq a (nth 6 box))
+    (setq a 0.0))
+  (if (or (null a) (not (numberp a)) (< (abs a) 1e-3))
+    0.0
+    a))
+
+;; 统一将一组图元绕其包络盒中心整体旋转摆正 (rot-ang > 0 时顺时针旋转 rot-ang, 即 vla-rotate -rot-ang)
+(defun dt:sz-straighten-objs (objs rot-ang / bb cen o)
+  (if (and objs (> (length objs) 0) rot-ang (> (abs rot-ang) 1e-3))
+    (progn
+      (setq bb (dt:rect-bbox objs))
+      (if bb
+        (progn
+          (setq cen (list (* 0.5 (+ (car bb) (caddr bb)))
+                          (* 0.5 (+ (cadr bb) (cadddr bb)))
+                          0.0))
+          (foreach o objs
+            (vl-catch-all-apply 'vla-rotate (list o (vlax-3d-point cen) (- rot-ang))))))))
+  objs)
+
 ;; 数值格式化(整数去小数点)
 (defun dt:sz-fmt-num (val)
   (if (equal val (float (fix (+ val 1e-6))) 1e-3)
@@ -348,8 +467,8 @@
         doc    (vla-get-activedocument acad)
         layers (vla-get-layers doc)
         ms     (vla-get-modelspace doc))
-  ;; 1) 保证 FLB_BOX 图层存在(青色 4)
-  (dt:ensure-layer layers "FLB_BOX" 4 "青色")
+  ;; 1) 保证 FLB_BOX 图层存在(浅青 130, 避免与螺丝孔 4 冲突)
+  (dt:ensure-layer layers "FLB_BOX" 130 "浅青")
 
   ;; 2) 绘制包络矩形(轻量多段线)
   (setq pts (vlax-make-safearray vlax-vbDouble '(0 . 7)))
@@ -503,6 +622,18 @@
   (if f (progn (vl-catch-all-apply 'close (list f)) (setq f nil)))
   (if (or (null res) (= res "")) def-val res))
 
+;; 扫描磁盘，寻找当天存在的最高序号图纸文件 (如 09.04.dwg, 09.04_1.dwg, 09.04_2.dwg...)
+;; 若 09.04_2.dwg 被删除，则自动返回 09.04_1.dwg；若都无，返回 nil
+(defun dt:sz-get-latest-target (month-dir base-name / latest idx full)
+  (setq latest nil)
+  (if (findfile (strcat month-dir "\\" base-name ".dwg"))
+    (setq latest (strcat month-dir "\\" base-name ".dwg")))
+  (setq idx 1)
+  (while (findfile (setq full (strcat month-dir "\\" base-name "_" (itoa idx) ".dwg")))
+    (setq latest full
+          idx (1+ idx)))
+  latest)
+
 ;; 自动检测下一个可用递增文件名 (如 09.04_1.dwg, 09.04_2.dwg)
 (defun dt:sz-next-avail-name (month-dir base-name / idx fname full)
   (setq idx 1
@@ -517,9 +648,10 @@
 ;; 全自动计算外协目标图纸全路径并创建对应年份和月份目录
 ;; 规则: {root}\{YY}\{MM}\{MM}.{DD}.dwg
 ;; 若已存在 09.04.dwg，命令行直接回车默认追加平铺；输入 N 则自动递增创建 09.04_1.dwg 并设为后续目标
+;; 若已存在 09.04_1.dwg，默认追加目标自动跟进为 09.04_1.dwg，输入 N 则递增为 09.04_2.dwg
 (defun dt:sz-auto-target-path (branch-name / def-root root cd s yy mm dd
                                            year-dir month-dir base-name def-path
-                                           cur-mem next-fname choice target)
+                                           cur-mem latest-exist next-fname choice target)
   (setq def-root (strcat "C:\\Users\\5600\\Documents\\CAD\\" branch-name))
   (setq root (dt:sz-cfg-get branch-name "root" def-root))
   ;; 若 ini 中配置的路径盘符不存在，则自动降级到当前用户文档目录
@@ -546,24 +678,32 @@
   (setq cur-mem (if (equal branch-name "线切割")
                   *dt-xqg-target-dwg*
                   *dt-jd-target-dwg*))
+  ;; 若记忆中的文件已在磁盘被删除，则重置记忆为 nil
+  (if (and cur-mem (null (findfile cur-mem)))
+    (setq cur-mem nil))
+
+  ;; 扫描磁盘获取当天已存在的最新图纸文件 (如 09.04_1.dwg)
+  (setq latest-exist (dt:sz-get-latest-target month-dir base-name))
+
+  ;; 优先以磁盘上存在的最高序号文件作为当前追加目标基准 (若 _2 被删则自动回退到 _1)
+  (if latest-exist
+    (setq cur-mem latest-exist))
 
   (cond
-    ;; 情况 1: 09.04.dwg 尚不存在，且当前无有效会话目标，直接作为首选目标 (零提示直接新建)
-    ((and (null (findfile def-path)) (or (null cur-mem) (null (findfile cur-mem))))
+    ;; 情况 1: 当天尚未生成任何图纸 (连 09.04.dwg 都不存在)，直接作为首选目标 (零提示直接新建)
+    ((null latest-exist)
       (setq target def-path))
 
-    ;; 情况 2: 图纸已存在，提供命令行选项: 回车默认追加已有图纸，输入 N 自动递增新建
+    ;; 情况 2: 图纸已存在，提供命令行选项: 回车默认追加已有最新图纸，输入 N 自动递增新建
     (T
-      (if (or (null cur-mem) (null (findfile cur-mem)))
-        (setq cur-mem def-path))
       (setq next-fname (dt:sz-next-avail-name month-dir base-name))
       (initget "A N")
       (setq choice (getkword (strcat "\n【" branch-name "】目标图纸已存在: "
-                                     (vl-filename-base cur-mem) ".dwg"
+                                     (if cur-mem (vl-filename-base cur-mem) base-name) ".dwg"
                                      "\n[追加(A)/新建为" next-fname "(N)] <A>: ")))
       (if (and choice (= (strcase choice) "N"))
         (setq target (strcat month-dir "\\" next-fname))
-        (setq target cur-mem))))
+        (setq target (if cur-mem cur-mem def-path)))))
 
   ;; 绑定并持久化到当前会话
   (if (equal branch-name "线切割")
@@ -631,6 +771,16 @@
           (vl-catch-all-apply 'vla-put-bigfontfile (list st "gbcbig.shx"))))))
   "DT_WX_STYLE")
 
+;; 确保指定文档中存在指定图层(直接访问目标文档 layers 集合, 彻底脱钩当前活动的 tblsearch)
+(defun dt:sz-ensure-doc-layer (doc name color / layers lay)
+  (setq layers (vla-get-layers doc))
+  (setq lay (vl-catch-all-apply 'vla-item (list layers name)))
+  (if (or (vl-catch-all-error-p lay) (null lay))
+    (setq lay (vl-catch-all-apply 'vla-add (list layers name))))
+  (if (and (not (vl-catch-all-error-p lay)) lay (numberp color))
+    (vl-catch-all-apply 'vla-put-color (list lay color)))
+  lay)
+
 ;; 在当前已打开的文档集合中按路径查找文档
 (defun dt:sz-find-open-doc (path / acad docs full found p1 p2 d)
   (setq acad  (vlax-get-acad-object)
@@ -661,30 +811,80 @@
               maxy (if maxy (max maxy (cadr p)) (cadr p))))))
   (if (and minx miny maxx maxy) (list minx miny maxx maxy) nil))
 
-;; 提取热流道脚本自动化生成的有效加工曲线 (严格限定在 FLB, LS, RZ, DK, JRT 白名单)
-(defun dt:sz-collect-auto-curves ( / ss ents cands e lay)
+;; 提取热流道脚本自动化生成的有效加工曲线 (严格限定在 FLB, LS, RZ, DK, JRT, DP, ZJJ 白名单)
+(defun dt:sz-collect-auto-curves ( / ss ents cands e ed lay obj)
   (setq cands nil)
-  (setq ss (ssget "X" '((0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
+  ;; 限制仅在模型空间 (410 . "Model") 提取曲线，彻底排除布局视口和图框干扰
+  (setq ss (ssget "X" '((410 . "Model") (0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
   (if ss
     (progn
       (setq ents (dt:ss->list ss))
       (foreach e ents
-        (setq lay (strcase (cdr (assoc 8 (entget e)))))
-        (if (member lay '("FLB" "LS" "RZ" "DK" "JRT"))
-          (setq cands (cons (vlax-ename->vla-object e) cands))))
+        (setq ed (entget e))
+        (if (and ed
+                 (setq lay (cdr (assoc 8 ed)))
+                 (= (type lay) 'STR)
+                 (member (strcase lay) '("FLB" "LS" "RZ" "DK" "JRT" "DP" "ZJJ")))
+          (progn
+            (setq obj (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
+            (if (and (not (vl-catch-all-error-p obj)) obj)
+              (setq cands (cons obj cands))))))
       (setq cands (reverse cands))))
   cands)
 
-;; 将所选曲线克隆并输出到目标 DWG (自动向右平铺排版 + 多行文字宽度限制自动折行)
-(defun dt:sz-export-to-dwg (cands title target-layer /
-                            cur-doc acad docs target-path tgt-doc was-closed
-                            ms-tgt existing-bb ins-x src-bb s-minx s-miny s-maxx s-maxy
-                            off-x off-y sa r copied-objs new-obj tmp-dir tmp-dwg
-                            w-res blk exp-res src-fname src-multiline part-w title-cx title-cy
-                            title-w txt-obj)
+;; 角度归一化到 [0, 2*pi)
+(defun dt:sz-norm-ang (a / two-pi)
+  (setq two-pi (* 2.0 pi))
+  (while (< a 0.0) (setq a (+ a two-pi)))
+  (while (>= a two-pi) (setq a (- a two-pi)))
+  a)
+
+;; 在当前活动图纸中执行原生镜像 (优先 vla-mirror, 保底原生 _.MIRROR 命令)
+;; 镜像轴: 水平直线 Y=y-axis (即过点 (0, y-axis) 与 (100, y-axis))
+(defun dt:sz-mirror-in-curdoc (objs y-axis / p1 p2 m-objs new-o ss last-e e o)
+  (setq p1 (vlax-3d-point (list 0.0 y-axis 0.0))
+        p2 (vlax-3d-point (list 100.0 y-axis 0.0))
+        m-objs nil)
+  ;; 1) 优先通过 COM vla-mirror 镜像 (当前文档具备完整 UCS 和视口, 速度极快)
+  (foreach o objs
+    (setq new-o (vl-catch-all-apply 'vla-mirror (list o p1 p2)))
+    (if (and (not (vl-catch-all-error-p new-o)) new-o)
+      (setq m-objs (cons new-o m-objs))))
+  (if (= (length m-objs) (length objs))
+    (reverse m-objs)
+    ;; 2) 若个别复杂图元(如特殊样条曲线) vla-mirror 受限，使用 AutoCAD 原生 _.MIRROR 命令 100% 批量保底
+    (progn
+      (foreach o m-objs (vl-catch-all-apply 'vla-delete (list o)))
+      (setq ss (ssadd))
+      (foreach o objs
+        (setq e (vlax-vla-object->ename o))
+        (if e (setq ss (ssadd e ss))))
+      (setq last-e (entlast))
+      (if (boundp 'command-s)
+        (command-s "_.MIRROR" ss "" (list 0.0 y-axis 0.0) (list 100.0 y-axis 0.0) "_N")
+        (vl-cmdf "_.MIRROR" ss "" (list 0.0 y-axis 0.0) (list 100.0 y-axis 0.0) "_N"))
+      (setq m-objs nil)
+      (while (setq last-e (entnext last-e))
+        (setq m-objs (cons (vlax-ename->vla-object last-e) m-objs)))
+      (reverse m-objs))))
+
+;; 将所选曲线排版并输出到目标 DWG (当前文档原生处理 + 原子级传输 + 防覆盖平铺 + 文字标注)
+;; is-auto: T=自动提取图层, nil=手动框选(手动模式 100% 全保留)
+(defun dt:sz-export-to-dwg (cands title target-layer is-auto /
+                            cur-doc acad docs target-path tgt-doc
+                            ms-tgt existing-bb ins-x rot-ang
+                            front-objs back-objs export-objs o c
+                            src-bb s-minx s-miny s-maxx s-maxy part-w part-h
+                            off-x off-y sa r
+                            tmp-dir tmp-dwg w-res blk exp-res
+                            keep-front keep-back lay-name
+                            src-fname src-multiline title-cx title-cy title-w txt-obj save-res)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
         docs    (vla-get-documents acad))
+
+  ;; 0) 预先探测源图形的整体倾斜角 (用于后续正交旋转摆正)
+  (setq rot-ang (dt:sz-detect-tilt-angle cands))
 
   ;; 1) 全自动计算并定位目标图纸全路径 (免弹窗选择)
   (setq target-path (dt:sz-auto-target-path title))
@@ -694,16 +894,12 @@
       nil)
     (progn
       ;; 2) 打开或创建目标文档
-      (setq tgt-doc (dt:sz-find-open-doc target-path)
-            was-closed nil)
+      (setq tgt-doc (dt:sz-find-open-doc target-path))
       (if (null tgt-doc)
         (if (findfile target-path)
+          (setq tgt-doc (vl-catch-all-apply 'vla-open (list docs target-path)))
           (progn
-            (setq tgt-doc (vl-catch-all-apply 'vla-open (list docs target-path))
-                  was-closed T))
-          (progn
-            (setq tgt-doc (vl-catch-all-apply 'vla-add (list docs))
-                  was-closed T)
+            (setq tgt-doc (vl-catch-all-apply 'vla-add (list docs)))
             (if (and (not (vl-catch-all-error-p tgt-doc)) tgt-doc)
               (vl-catch-all-apply 'vla-saveas (list tgt-doc target-path))))))
 
@@ -713,98 +909,170 @@
           nil)
         (progn
           (setq ms-tgt (vla-get-modelspace tgt-doc))
-          ;; 确保文字样式存在
+          ;; 确保文字样式与专用图层在目标图纸中准确就绪
           (dt:sz-ensure-style tgt-doc)
+          (dt:sz-ensure-doc-layer tgt-doc "外协文字" 7)
+          (if target-layer
+            (dt:sz-ensure-doc-layer tgt-doc target-layer 1)
+            (progn
+              (dt:sz-ensure-doc-layer tgt-doc "FLB" 1)
+              (dt:sz-ensure-doc-layer tgt-doc "LS" 4)
+              (dt:sz-ensure-doc-layer tgt-doc "RZ" 30)
+              (dt:sz-ensure-doc-layer tgt-doc "DK" 8)
+              (dt:sz-ensure-doc-layer tgt-doc "JRT" 2)
+              (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
+              (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 210)))
+
           ;; 3) 扫描目标图纸现有图元包络盒(实现向右安全平铺，间距 150mm)
           (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc))
           (if existing-bb
-            (setq ins-x (+ (caddr existing-bb) 150.0)) ; 已有图形 maxX + 150.0
-            (setq ins-x 0.0))
+            (setq ins-x (+ (caddr existing-bb) 150.0)) ; 已有图形最右侧 + 150mm
+            (setq ins-x 0.0))                          ; 若图纸为空(首个工件), 起点 X = 0.0
 
-          ;; 4) 源图元包络盒与平移量计算
-          (setq src-bb (dt:rect-bbox cands)
-                s-minx (car src-bb)
-                s-miny (cadr src-bb)
-                s-maxx (caddr src-bb)
-                s-maxy (cadddr src-bb)
-                off-x  (- ins-x s-minx)
-                off-y  (- 0.0 s-miny))
+          ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
+          (vla-startundomark cur-doc)
 
-          ;; 5) 跨图纸克隆图元 (优先 CopyObjects, 异常回退 WBLOCK)
-          (setq sa (vlax-make-safearray vlax-vbObject (cons 0 (1- (length cands)))))
-          (vlax-safearray-fill sa cands)
-          (setq r (vl-catch-all-apply 'vla-copyobjects (list cur-doc sa ms-tgt))
-                copied-objs nil)
-          (if (and (not (vl-catch-all-error-p r)) r)
-            (setq copied-objs (vlax-safearray->list (vlax-variant-value r)))
+          ;; 4a. 克隆 cands 生成正面临时图元 front-objs
+          (setq front-objs nil)
+          (foreach o cands
+            (setq c (vl-catch-all-apply 'vla-copy (list o)))
+            (if (and (not (vl-catch-all-error-p c)) c)
+              (setq front-objs (cons c front-objs))))
+          (setq front-objs (reverse front-objs))
+
+          (if (null front-objs)
             (progn
-              ;; 回退方案: 临时 WBLOCK 导入后炸开
-              (setq tmp-dir (getenv "TEMP"))
-              (if (null tmp-dir) (setq tmp-dir "C:\\TEMP"))
-              (setq tmp-dwg (strcat tmp-dir "\\_dt_wx_tmp.dwg"))
-              (vl-catch-all-apply 'vl-file-delete (list tmp-dwg))
-              (setq w-res (vl-catch-all-apply 'vla-wblock (list cur-doc tmp-dwg sa)))
-              (if (and (not (vl-catch-all-error-p w-res)) (findfile tmp-dwg))
-                (progn
-                  (setq blk (vl-catch-all-apply
-                              'vla-insertblock
-                              (list ms-tgt (vlax-3d-point 0 0 0) tmp-dwg 1.0 1.0 1.0 0.0)))
-                  (if (and (not (vl-catch-all-error-p blk)) blk)
-                    (progn
-                      (setq exp-res (vl-catch-all-apply 'vla-explode (list blk)))
-                      (vl-catch-all-apply 'vla-delete (list blk))
-                      (if (not (vl-catch-all-error-p exp-res))
-                        (setq copied-objs (vlax-safearray->list (vlax-variant-value exp-res))))))
-                  (vl-catch-all-apply 'vl-file-delete (list tmp-dwg))))))
-
-          (if (null copied-objs)
-            (progn
-              (princ "\n【错误】跨图纸克隆图元失败，请确认图纸未被写保护。")
+              (vla-endundomark cur-doc)
+              (princ "\n【错误】克隆源图元失败。")
               nil)
             (progn
-              ;; 平移新克隆图元至计算出的安全排版落点
-              (foreach new-obj copied-objs
-                (vl-catch-all-apply
-                  'vla-move
-                  (list new-obj (vlax-3d-point 0 0 0) (vlax-3d-point off-x off-y 0)))
-                (if target-layer
-                  (progn
-                    (dt:ensure-layer (vla-get-layers tgt-doc) target-layer 4 "青色")
-                    (vl-catch-all-apply 'vla-put-layer (list new-obj target-layer)))))
+              ;; 若指定目标图层(如线切割置入 FLB)，统一设置
+              (if target-layer
+                (foreach o front-objs
+                  (vl-catch-all-apply 'vla-put-layer (list o target-layer))))
 
-              ;; 6) 在工件上方居中标注原图纸文件名 (字高 15，智能断句为多行，底部居中对齐)
-              (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
-              (if (or (null src-fname) (= src-fname "")) (setq src-fname "未命名工件"))
-              (setq src-multiline (dt:sz-format-multiline src-fname))
-              (setq part-w   (- s-maxx s-minx)
-                    title-cx (+ ins-x (* 0.5 part-w))
-                    title-cy (+ (- s-maxy s-miny) 15.0)
-                    title-w  (max 80.0 (min part-w 220.0)))
-              (dt:ensure-layer (vla-get-layers tgt-doc) "外协文字" 7 "白色")
-              (setq txt-obj (vl-catch-all-apply
-                              'vla-addmtext
-                              (list ms-tgt (vlax-3d-point (list title-cx title-cy 0.0)) title-w src-multiline)))
-              (if (and (not (vl-catch-all-error-p txt-obj)) txt-obj)
+              ;; 4b. 旋转摆正: 若源工件倾斜，所有正面曲线一起旋转摆正
+              (if (and rot-ang (> (abs rot-ang) 1e-3))
+                (dt:sz-straighten-objs front-objs rot-ang))
+
+              ;; 4c. 计算包络盒并将正面工件归一化平移至原点 (X=0, Y=0)
+              (setq src-bb (dt:rect-bbox front-objs))
+              (if (or (null src-bb) (/= (length src-bb) 4))
                 (progn
-                  (vl-catch-all-apply 'vla-put-height (list txt-obj 15.0))
-                  ;; 8 = acAttachmentPointBottomCenter (底部居中对齐，向上生长且水平严格居中)
-                  (vl-catch-all-apply 'vla-put-attachmentpoint (list txt-obj 8))
-                  (vl-catch-all-apply 'vla-put-insertionpoint (list txt-obj (vlax-3d-point (list title-cx title-cy 0.0))))
-                  (vl-catch-all-apply 'vla-put-linespacingfactor (list txt-obj 1.2))
-                  (vl-catch-all-apply 'vla-put-layer (list txt-obj "外协文字"))
-                  (vl-catch-all-apply 'vla-put-stylename (list txt-obj "DT_WX_STYLE"))))
+                  (foreach o front-objs (vl-catch-all-apply 'vla-delete (list o)))
+                  (vla-endundomark cur-doc)
+                  (princ "\n【错误】计算正面工件包络盒失败。")
+                  nil)
+                (progn
+                  (setq s-minx (car src-bb)
+                        s-miny (cadr src-bb)
+                        s-maxx (caddr src-bb)
+                        s-maxy (cadddr src-bb)
+                        part-w (- s-maxx s-minx)
+                        part-h (- s-maxy s-miny)
+                        off-x  (- 0.0 s-minx)
+                        off-y  (- 0.0 s-miny))
+                  (foreach o front-objs
+                    (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list off-x off-y 0.0))))
 
-              ;; 7) 保存目标图纸并提示
-              (vl-catch-all-apply 'vla-save (list tgt-doc))
-              (if was-closed
-                (vl-catch-all-apply 'vla-close (list tgt-doc :vlax-false)))
+                  ;; 4d. 精雕正反面镜像 (在当前文档中调用原生镜像，镜像轴 Y = -37.5，间隔严格 75mm)
+                  (setq back-objs nil)
+                  (if (equal title "精雕")
+                    (progn
+                      (setq back-objs (dt:sz-mirror-in-curdoc front-objs -37.5))
+                      ;; 图层分离规则:
+                      (if is-auto
+                        (progn
+                          ;; 自动模式: 正面排除 RZ, DP
+                          (setq keep-front nil)
+                          (foreach o front-objs
+                            (setq lay-name (strcase (vla-get-layer o)))
+                            (if (member lay-name '("RZ" "DP"))
+                              (vl-catch-all-apply 'vla-delete (list o))
+                              (setq keep-front (cons o keep-front))))
+                          (setq front-objs (reverse keep-front))
 
-              (princ "\n------------------------------------------------------------")
-              (princ (strcat "\n【" title "】工件已成功输出并排版至: " target-path))
-              (princ (strcat "\n【" title "】排版起点 X = " (rtos ins-x 2 2)
-                             " (自动避开已有图形, 安全间距 150mm, 上方已标注文件名)"))
-              (princ "\n------------------------------------------------------------")
-              T)))))))
+                          ;; 自动模式: 反面排除 ZJJ, DK
+                          (setq keep-back nil)
+                          (foreach o back-objs
+                            (setq lay-name (strcase (vla-get-layer o)))
+                            (if (member lay-name '("ZJJ" "DK"))
+                              (vl-catch-all-apply 'vla-delete (list o))
+                              (setq keep-back (cons o keep-back))))
+                          (setq back-objs (reverse keep-back)))
+                        ;; 手动框选模式: 100% 全部保留，正反面均不执行任何删除
+                        nil)))
+
+                  ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 X=ins-x
+                  (setq export-objs (append front-objs back-objs))
+                  (if (> ins-x 0.0)
+                    (foreach o export-objs
+                      (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list ins-x 0.0 0.0)))))
+
+                  ;; 5) 原子级跨图纸深拷贝 (CopyObjects, 异常回退 WBLOCK)
+                  (setq sa (vlax-make-safearray vlax-vbObject (cons 0 (1- (length export-objs)))))
+                  (vlax-safearray-fill sa export-objs)
+                  (setq r (vl-catch-all-apply 'vla-copyobjects (list cur-doc sa ms-tgt)))
+                  (if (vl-catch-all-error-p r)
+                    (progn
+                      ;; 回退 WBLOCK
+                      (setq tmp-dir (getenv "TEMP"))
+                      (if (null tmp-dir) (setq tmp-dir "C:\\TEMP"))
+                      (setq tmp-dwg (strcat tmp-dir "\\_dt_wx_tmp.dwg"))
+                      (vl-catch-all-apply 'vl-file-delete (list tmp-dwg))
+                      (setq w-res (vl-catch-all-apply 'vla-wblock (list cur-doc tmp-dwg sa)))
+                      (if (and (not (vl-catch-all-error-p w-res)) (findfile tmp-dwg))
+                        (progn
+                          (setq blk (vl-catch-all-apply
+                                      'vla-insertblock
+                                      (list ms-tgt (vlax-3d-point 0 0 0) tmp-dwg 1.0 1.0 1.0 0.0)))
+                          (if (and (not (vl-catch-all-error-p blk)) blk)
+                            (progn
+                              (setq exp-res (vl-catch-all-apply 'vla-explode (list blk)))
+                              (vl-catch-all-apply 'vla-delete (list blk))))
+                          (vl-catch-all-apply 'vl-file-delete (list tmp-dwg))))))
+
+                  ;; 6) 彻底清理当前图纸临时图元并关闭 Undo
+                  (foreach o export-objs
+                    (vl-catch-all-apply 'vla-delete (list o)))
+                  (vla-endundomark cur-doc)
+
+                  ;; 7) 在目标图纸工件上方居中标注原图纸文件名 (字高 15，多行居中对齐，距离工件顶沿 50mm 防遮挡)
+                  (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
+                  (if (or (null src-fname) (= src-fname "")) (setq src-fname "未命名工件"))
+                  (setq src-multiline (dt:sz-format-multiline src-fname))
+                  (setq title-cx (+ ins-x (* 0.5 part-w))
+                        title-cy (+ part-h 50.0)
+                        title-w  (max 80.0 (min part-w 220.0)))
+                  (setq txt-obj (vl-catch-all-apply
+                                  'vla-addmtext
+                                  (list ms-tgt (vlax-3d-point (list title-cx title-cy 0.0)) title-w src-multiline)))
+                  (if (and (not (vl-catch-all-error-p txt-obj)) txt-obj)
+                    (progn
+                      (vl-catch-all-apply 'vla-put-height (list txt-obj 15.0))
+                      ;; 8 = acAttachmentPointBottomCenter (底部居中对齐，向上生长且水平严格居中)
+                      (vl-catch-all-apply 'vla-put-attachmentpoint (list txt-obj 8))
+                      (vl-catch-all-apply 'vla-put-insertionpoint (list txt-obj (vlax-3d-point (list title-cx title-cy 0.0))))
+                      (vl-catch-all-apply 'vla-put-linespacingfactor (list txt-obj 1.2))
+                      (vl-catch-all-apply 'vla-put-layer (list txt-obj "外协文字"))
+                      (vl-catch-all-apply 'vla-put-stylename (list txt-obj "DT_WX_STYLE")))
+                    (if (vl-catch-all-error-p txt-obj)
+                      (princ (strcat "\n【" title "】生成标注文字警告: " (vl-catch-all-error-message txt-obj)))))
+
+                  ;; 8) 保存目标图纸并刷新
+                  (setq save-res (vl-catch-all-apply 'vla-save (list tgt-doc)))
+                  (if (vl-catch-all-error-p save-res)
+                    (setq save-res (vl-catch-all-apply 'vla-saveas (list tgt-doc target-path))))
+                  (if (vl-catch-all-error-p save-res)
+                    (princ (strcat "\n【" title "】保存目标图纸警告: " (vl-catch-all-error-message save-res))))
+                  (vl-catch-all-apply 'vla-regen (list tgt-doc :vlax-acallviewports))
+
+                  (princ "\n------------------------------------------------------------")
+                  (princ (strcat "\n【" title "】工件已成功输出并排版至: " target-path))
+                  (princ (strcat "\n【" title "】排版起点 X = " (rtos ins-x 2 2)
+                                 " (安全间距 150mm, 倾斜图形已摆正, 正反面间隔严格 75mm, 上方已标注文件名)"))
+                  (princ "\n------------------------------------------------------------")
+                  T)))))))))
 
 ;; ============================================================================
 ;; 四、主命令与对外接口
@@ -814,7 +1082,6 @@
 (defun c:FLBSZ ( / *error* ss cands closed-p box len wid p1 p2 p3 p4 ang
                    clip-str msg choice)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda () (command "_.UNDO" "E")))
     (if (and msg
              (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
       (princ (strcat "\n【分流板尺寸】错误: " msg)))
@@ -832,6 +1099,22 @@
 
   ;; 步骤 2: 检验 FLB 图层是否构成闭合区域
   (setq closed-p (if cands (dt:sz-check-closed cands) nil))
+
+  ;; 防御保护: 若 FLB 图层包含多个独立封闭图形(例如旧版本图纸遗留的复制件)，主动提示并降级手动框选
+  (if (and cands closed-p (boundp '*dt-sz-multi-regions*) *dt-sz-multi-regions* (> *dt-sz-multi-regions* 1))
+    (progn
+      (princ (strcat "\n【分流板尺寸】提示: 图层 \"FLB\" 检测到 "
+                     (itoa *dt-sz-multi-regions*)
+                     " 个独立封闭图形(可能包含旧数据图纸复制件)。"))
+      (princ "\n为避免多份包络造成尺寸误差，请手动框选需要测量的分流板: ")
+      (setq ss (ssget '((0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
+      (if (null ss)
+        (progn
+          (princ "\n【分流板尺寸】未选择图元，命令已取消。")
+          (setq cands nil closed-p nil))
+        (progn
+          (setq cands (dt:sz-curves-only (dt:ss->list ss)))
+          (setq closed-p (if cands (dt:sz-check-closed cands) nil))))))
 
   ;; 若未找到 FLB 或 FLB 未闭合，提示并转入手动选择
   (if (null closed-p)
@@ -906,7 +1189,6 @@
 ;; 线切割主命令 (c:XQG)
 (defun c:XQG ( / *error* ss cands closed-p)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda () (command "_.UNDO" "E")))
     (if (and msg
              (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
       (princ (strcat "\n【线切割】错误: " msg)))
@@ -948,14 +1230,13 @@
 
   ;; 步骤 3: 复制并输出到目标图纸 (自动平铺排版防覆盖, 上方标注文件名)
   (if (and cands closed-p)
-    (dt:sz-export-to-dwg cands "线切割" "FLB"))
+    (dt:sz-export-to-dwg cands "线切割" "FLB" nil))
   (princ)
 )
 
 ;; 精雕主命令 (c:JD)
-(defun c:JD ( / *error* ss cands)
+(defun c:JD ( / *error* ss cands is-auto)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda () (command "_.UNDO" "E")))
     (if (and msg
              (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
       (princ (strcat "\n【精雕】错误: " msg)))
@@ -963,28 +1244,30 @@
 
   (princ "\n【精雕】正在提取热流道加工曲线...")
   (setq cands (dt:sz-collect-auto-curves))
-
-  ;; 若自动化图层未找到有效曲线，提示并转入手动框选
-  (if (null cands)
+  (if (and cands (> (length cands) 0))
+    (setq is-auto T)
     (progn
-      (princ "\n【精雕】未在自动化图层(FLB/LS/RZ/DK/JRT)找到曲线，请手动框选加工曲线:")
+      (setq is-auto nil)
+      (princ "\n【精雕】未在自动化图层(FLB/LS/RZ/DK/JRT/DP/ZJJ)找到曲线，请手动框选加工曲线:")
       (setq ss (ssget '((0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
       (if (null ss)
         (princ "\n【精雕】未选择图元，命令已取消。")
         (setq cands (dt:sz-curves-only (dt:ss->list ss))))))
 
-  ;; 输出到自动路径的精雕图纸
+  ;; 输出到自动路径的精雕图纸 (含 75mm 间隔上下镜像正反面排版)
   (if cands
-    (dt:sz-export-to-dwg cands "精雕" nil))
+    (dt:sz-export-to-dwg cands "精雕" nil is-auto))
   (princ)
 )
 
 ;; 数据图纸主命令 (c:SJTZ)
 (defun c:SJTZ ( / *error* ss cands o bb p0 p1 dx dy new-objs new-o new-bb
                    minx miny maxx maxy date-str def-mj def-flb flb-ss
-                   flb-cands flb-box mtxt-str doc ms x-label y-top th mtxt-obj)
+                   flb-cands flb-box mtxt-str doc ms x-label y-top th mtxt-obj
+                   rot-ang undo-started)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda () (command "_.UNDO" "E")))
+    (if undo-started
+      (vl-catch-all-apply 'vla-endundomark (list (vla-get-activedocument (vlax-get-acad-object)))))
     (if (and msg
              (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
       (princ (strcat "\n【数据图纸】错误: " msg)))
@@ -996,7 +1279,7 @@
   ;; 若未找到则转入手动框选
   (if (null cands)
     (progn
-      (princ "\n【数据图纸】未在自动化图层(FLB/LS/RZ/DK/JRT)找到曲线，请手动框选曲线:")
+      (princ "\n【数据图纸】未在自动化图层(FLB/LS/RZ/DK/JRT/DP/ZJJ)找到曲线，请手动框选曲线:")
       (setq ss (ssget '((0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
       (if (null ss)
         (princ "\n【数据图纸】未选择图元，命令已取消。")
@@ -1005,6 +1288,9 @@
   ;; 步骤 2: 交互式复制与自由移动
   (if (and cands (> (length cands) 0))
     (progn
+      ;; 探测加工曲线(优先分流板)的整体倾斜角
+      (setq rot-ang (dt:sz-detect-tilt-angle cands))
+
       (setq bb (dt:rect-bbox cands)
             p0 (list (* 0.5 (+ (car bb) (caddr bb)))
                      (* 0.5 (+ (cadr bb) (cadddr bb)))
@@ -1017,9 +1303,15 @@
           (setq dx (- (car p1) (car p0))
                 dy (- (cadr p1) (cadr p0)))
 
-          (command "_.UNDO" "BE")
+          (setq doc (vla-get-activedocument (vlax-get-acad-object))
+                ms  (vla-get-modelspace doc))
+          (setq undo-started T)
+          (vl-catch-all-apply 'vla-startundomark (list doc))
 
-          ;; 克隆图元并移动至目标位置
+          ;; 确保专用隔离图层 "数据图纸" 存在(白色 7)
+          (dt:ensure-layer (vla-get-layers doc) "数据图纸" 7 "白色")
+
+          ;; 克隆图元并移动至目标位置，全部置入新图层 "数据图纸" (防止干扰 FLB 尺寸测量)
           (setq new-objs nil)
           (foreach o cands
             (setq new-o (vl-catch-all-apply 'vla-copy (list o)))
@@ -1028,7 +1320,12 @@
                 (vl-catch-all-apply
                   'vla-move
                   (list new-o (vlax-3d-point 0 0 0) (vlax-3d-point dx dy 0)))
+                (vl-catch-all-apply 'vla-put-layer (list new-o "数据图纸"))
                 (setq new-objs (cons new-o new-objs)))))
+
+          ;; 图形摆正: 若分流板倾斜，将复制出来的所有图形曲线整体一起旋转摆正(垂直或平行)
+          (if (and rot-ang (> (abs rot-ang) 1e-3))
+            (dt:sz-straighten-objs new-objs rot-ang))
 
           (setq new-bb (dt:rect-bbox new-objs))
           (if (null new-bb)
@@ -1041,14 +1338,13 @@
                     maxx (caddr new-bb)
                     maxy (cadddr new-bb))
 
-              ;; 步骤 3: 提取/预填各项参数值
-              ;; 步骤 3: 提取参数值 (自动生成当前无空格日期、文件名及分流板长宽，其余留空不弹窗打扰)
+              ;; 步骤 3: 提取参数值 (自动生成当前无空格日期、文件名及母件分流板长宽)
               (setq date-str (dt:sz-get-date-str))
 
               (setq def-mj (vl-filename-base (dt:sz-gets "DWGNAME")))
               (if (or (null def-mj) (= def-mj "")) (setq def-mj "1031-02"))
 
-              ;; 自动探测分流板尺寸 (仅最长*最宽，不拼接厚度)
+              ;; 自动探测分流板尺寸 (复制图元已入 "数据图纸"，FLB 图层仅剩母件，准确无双重包络)
               (setq def-flb "")
               (setq flb-ss (ssget "X" '((8 . "FLB") (0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
               (if flb-ss
@@ -1070,8 +1366,6 @@
                             "出线：\\P"
                             "日期：" date-str))
 
-              (setq doc (vla-get-activedocument (vlax-get-acad-object))
-                    ms  (vla-get-modelspace doc))
               (dt:sz-ensure-style doc)
               (dt:ensure-layer (vla-get-layers doc) "外协文字" 7 "白色")
 
@@ -1092,10 +1386,10 @@
                   (vl-catch-all-apply 'vla-put-layer (list mtxt-obj "外协文字"))
                   (vl-catch-all-apply 'vla-put-stylename (list mtxt-obj "DT_WX_STYLE"))))
 
-              (command "_.UNDO" "E")
-              (princ "\n【数据图纸】图形复制与右侧信息文字区域生成完成。")))))))
+              (if undo-started (vl-catch-all-apply 'vla-endundomark (list doc)))
+              (princ "\n【数据图纸】图形已克隆至图层 \"数据图纸\"(倾斜已摆正)，右侧信息文字生成完成。")))))))
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.0 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.2 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)

@@ -189,7 +189,8 @@
         (list "nozzle_offset" '*dt-nozzle-offset* 40.0) ; 热咀偏移(封口线中点沿通道向内)
         (list "nozzle_r" '*dt-nozzle-r* 11.35) ; 热咀半径
         (list "pin_r" '*dt-pin-r* 3.0) ; 点孔半径(与热咀圆同心, 设 0 不画)
-        (list "rect_chamfer" '*dt-rect-chamfer* 10.0))) ; 板角倒角(v9.8 矩形模板: 板边四角45°倒角)
+        (list "rect_chamfer" '*dt-rect-chamfer* 10.0) ; 板角倒角(v9.8 矩形模板: 板边四角45°倒角)
+        (list "zjj_r" '*dt-zjj-r* 14.35))) ; 主进胶半径(默认14.35, DP圆心画圆)
 (foreach p dt:param-table (set (cadr p) (caddr p)))
 (setq *dt-jt-envelope* nil)  ; v10.5: 假体包络法开关(参数框勾选框; 默认关=传统逐步; ini[假体]节/mem 可改)
 
@@ -1983,14 +1984,15 @@
                 ("fillet_r_hole" . 15.0) ("chamfer_d" . 5.0)
                 ("screw_in" . 10.0) ("screw_r" . 4.25)
                 ("nozzle_offset" . 40.0) ("nozzle_r" . 11.35)
-                ("pin_r" . 3.0))
+                ("pin_r" . 3.0) ("zjj_r" . 14.35))
               nil)
         (list "矩形"
               "LD范围向外扩矩形板边(四角倒角)+圆角矩形假体; 热咀拐点/预画RZ, 螺丝板边中点/预画LS"
               '(("offset_dist" . 35.0) ("hole_dist" . 50.0)
                 ("fillet_r_hole" . 15.0) ("screw_in" . 15.0)
                 ("screw_r" . 4.25) ("nozzle_r" . 11.35)
-                ("pin_r" . 3.0) ("rect_chamfer" . 10.0))
+                ("pin_r" . 3.0) ("rect_chamfer" . 10.0)
+                ("zjj_r" . 14.35))
               '((process . dt:rect-process)))))
 (setq *dt-flb-template* 0)  ; 当前选中模板下标(选择框确定后更新)
 (setq *dt-flb-tpl-pick* 0)  ; 选择框单选过程中的临时下标(回调写入)
@@ -2008,7 +2010,8 @@
         ("nozzle_offset" . "热咀偏移:")
         ("nozzle_r"      . "热咀半径R:")
         ("pin_r"         . "点孔半径R:")
-        ("rect_chamfer"  . "板角倒角:")))
+        ("rect_chamfer"  . "板角倒角:")
+        ("zjj_r"         . "主进胶R:")))
 
 ;; 当前模板用到的参数键列表(= 模板参数默认表的键序; v9.9 参数框动态化)
 (defun dt:flb-tpl-keys ( / )
@@ -2124,6 +2127,30 @@
 (defun dt:rect-restore-circles (snap layer / s)
   (foreach s snap
     (dt:rect-addcircle (list (car s) (cadr s) 0.0) (caddr s) layer)))
+
+;; 检测 DP 图层上的圆并在其圆心创建主进胶圆 (R=*dt-zjj-r*, 默认 14.35, 图层 ZJJ, 颜色 210 紫色)
+(defun dt:flb-process-zjj ( / doc layers ss i e obj cen c-obj zjj-count)
+  (setq doc (vla-get-activedocument (vlax-get-acad-object))
+        layers (vla-get-layers doc)
+        zjj-count 0)
+  (dt:ensure-layer layers "ZJJ" 210 "紫色")
+  (setq ss (ssget "X" '((8 . "DP") (0 . "CIRCLE"))))
+  (if ss
+    (progn
+      (command "_.UNDO" "BE")
+      ;; 清理旧 ZJJ 产物，避免重复重叠生成
+      (dt:purge-layer "ZJJ")
+      (repeat (setq i (sslength ss))
+        (setq e (ssname ss (setq i (1- i)))
+              obj (vlax-ename->vla-object e))
+        (setq cen (vlax-safearray->list (vlax-variant-value (vla-get-center obj))))
+        (setq c-obj (dt:rect-addcircle (list (car cen) (cadr cen) 0.0) *dt-zjj-r* "ZJJ"))
+        (setq zjj-count (1+ zjj-count)))
+      (command "_.UNDO" "E")
+      (if (> zjj-count 0)
+        (princ (strcat "\n【主进胶】检测到 DP 垫片圆 " (itoa zjj-count)
+                       " 个，已在圆心创建主进胶圆(R" (rtos *dt-zjj-r* 2 2) "，图层 ZJJ)。")))))
+  zjj-count)
 
 ;; boundingbox 输出解包: vla-getboundingbox 的输出参数有的版本绑定为
 ;; safearray 本体, 有的为 variant(内含 safearray) —— 统一容忍两种
@@ -2246,20 +2273,22 @@
                            corners nl ls-count cham x0l x1r cy ld-del l c s)
   (setq doc (vla-get-activedocument (vlax-get-acad-object))
         layers (vla-get-layers doc))
-  ;; 1) 建全部 13 层(与通用模板一致, 空图跑一次也能建齐)
+  ;; 1) 建全部 14 层(与通用模板一致, 空图跑一次也能建齐, 颜色无重复)
   (foreach l (list (list "LD" 7 "白色") (list "FLB" 1 "红色")
                    (list "FBX" 3 "绿色") (list "LS" 4 "青色")
-                   (list "JT" 6 "洋红") (list "JTFBX" 2 "黄色")
-                   (list "RZ" 30 "橙色") (list "DK" 7 "白色")
-                   (list "DP" 5 "蓝色") (list "CX" 5 "蓝色")
-                   (list "CXK" 5 "蓝色") (list "JRT" 2 "黄色")
-                   (list "JRTDW" 2 "黄色"))
+                   (list "JT" 6 "洋红") (list "JTFBX" 70 "黄绿")
+                   (list "RZ" 30 "橙色") (list "DK" 8 "灰色")
+                   (list "DP" 5 "蓝色") (list "CX" 140 "天蓝")
+                   (list "CXK" 150 "亮蓝") (list "JRT" 2 "黄色")
+                   (list "JRTDW" 40 "橙黄") (list "ZJJ" 210 "紫色"))
     (dt:ensure-layer layers (car l) (cadr l) (caddr l)))
-  (princ "\n【矩形】已预建全部 13 个图层(LD/FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW)。")
+  (princ "\n【矩形】已预建全部 14 个图层(LD/FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW/ZJJ)。")
   ;; 2) LD 对象与整体范围
   (setq ss (ssget "X" (list (cons 8 "LD"))))
   (if (null ss)
-    (princ "\n【提示】图层 \"LD\" 没有任何对象, 请先画好流道中心线再运行。")
+    (progn
+      (dt:flb-process-zjj)
+      (princ "\n【提示】图层 \"LD\" 没有任何对象, 请先画好流道中心线再运行。"))
     (progn
       (setq objs (mapcar 'vlax-ename->vla-object (dt:ss->list ss)))
       (setq bb (dt:rect-bbox objs))
@@ -2273,7 +2302,7 @@
           (setq total-purged (+ (dt:purge-layer "FLB") (dt:purge-layer "FBX")
                                 (dt:purge-layer "LS") (dt:purge-layer "JT")
                                 (dt:purge-layer "JTFBX") (dt:purge-layer "RZ")
-                                (dt:purge-layer "DK")))
+                                (dt:purge-layer "DK") (dt:purge-layer "ZJJ")))
           (command "_.UNDO" "E")
           (princ (strcat "\n已清理上一轮产物 " (itoa total-purged) " 个对象。"))
           (command "_.UNDO" "BE")
@@ -2329,6 +2358,8 @@
           ;; 8) 删除 LD 源线(slot v9.6 同款约定: 重跑需重画源线; 与画图
           ;;    同一撤销组, 一次 Ctrl+Z 连同源线一起找回)
           (setq ld-del (dt:purge-layer "LD"))
+          ;; 8.5) 若有 DP 垫片圆，同步在圆心创建主进胶圆 (ZJJ)
+          (dt:flb-process-zjj)
           (command "_.UNDO" "E")
           ;; 9) 统计
           (princ (strcat "\n【完成·矩形】热咀 " (itoa nl) " 个, 螺丝 " (itoa ls-count)
@@ -2398,21 +2429,24 @@
                        (list close-layer 3 "绿色")
                        (list screw-layer 4 "青色")
                        (list hole-layer 6 "洋红")
-                       (list hole-close-layer 2 "黄色")
+                       (list hole-close-layer 70 "黄绿")
                        (list "RZ" 30 "橙色")
-                       (list "DK" 7 "白色")
+                       (list "DK" 8 "灰色")
                        (list "DP" 5 "蓝色")
-                       (list "CX" 5 "蓝色")
-                       (list "CXK" 5 "蓝色")
+                       (list "CX" 140 "天蓝")
+                       (list "CXK" 150 "亮蓝")
                        (list "JRT" 2 "黄色")
-                       (list "JRTDW" 2 "黄色"))
+                       (list "JRTDW" 40 "橙黄")
+                       (list "ZJJ" 210 "紫色"))
         (dt:ensure-layer layers (car l) (cadr l) (caddr l)))
       ;; ----------------------------------------------------------------
       ;; 第 2 步: 一次性选中"LD"图层上的全部对象(覆盖全图, 无需逐个选择)
       ;; ----------------------------------------------------------------
       (setq ss (ssget "X" (list (cons 8 src-layer))))
       (if (null ss)
-        (princ (strcat "\n【提示】图层 \"" src-layer "\" 已就绪但没有任何对象, 请画好流道中心线后再运行 OFF。"))
+        (progn
+          (dt:flb-process-zjj)
+          (princ (strcat "\n【提示】图层 \"" src-layer "\" 已就绪但没有任何对象, 请画好流道中心线后再运行 OFF。")))
         (progn
 
           ;; ------------------------------------------------------------
@@ -2428,7 +2462,8 @@
                                 (dt:purge-layer hole-layer)
                                 (dt:purge-layer hole-close-layer)
                                 (dt:purge-layer "RZ")
-                                (dt:purge-layer "DK")))
+                                (dt:purge-layer "DK")
+                                (dt:purge-layer "ZJJ")))
           ;; 注意: DP(垫片)/CX(出线槽)/CXK(出线口)/JRT(加热条)/
           ;; JRTDW(加热条定位)均不清理 —— DP/JRTDW 留给用户手动绘制,
           ;; CX/CXK 归 cx_runner 脚本, JRT 归 jrt_runner 脚本(重跑各自自清)。
@@ -2544,6 +2579,9 @@
               (command "_.UNDO" "BE")
               (dt:merge-layer hole-close-layer hole-layer)
               (command "_.UNDO" "E")))
+
+          ;; 步骤 16.5: 若有 DP 垫片圆，同步在圆心创建主进胶圆 (ZJJ)
+          (dt:flb-process-zjj)
 
           ;; ------------------------------------------------------------
           ;; (v9.0 起: 出线槽流程已移至独立脚本 cx_runner, 命令 SLOT)

@@ -25,6 +25,7 @@ dt_param : dialog {
     }
     : row {
       : edit_box { key = "pin_r"; label = "点孔半径R:"; edit_width = 10; }
+      : edit_box { key = "zjj_r"; label = "主进胶R:"; edit_width = 10; }
     }
   }
   : toggle { key = "jt_envelope"; label = "假体用包络法(FLB外扩整体圆角矩形)"; }
@@ -36,7 +37,7 @@ dt_param : dialog {
   }
 }
 
-off_template_select : dialog {
+flb_template_select : dialog {
   label = "选择分流板模板";
   : boxed_radio_column {
     label = "模板";
