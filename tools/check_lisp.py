@@ -153,6 +153,7 @@ WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
 DEMO = ['c:DEMOREC', 'c:DEMOSTOP', 'c:DEMOMARK',
         'demo:gets', 'demo:canon', 'demo:skip-p', 'demo:writeline', 'demo:pt-s',
         'demo:ent-info', 'demo:dump-new',
+        'demo:watch-p', 'demo:snap-all', 'demo:diff-del', 'demo:inventory',
         'demo:cmd-will-start', 'demo:cmd-ended', 'demo:cmd-abort', 'demo:sv-changed']
 
 if 'dt_start' in base:

@@ -4,6 +4,10 @@ jrt_param : dialog {
   : boxed_column {
     label = "加热条参数";
     : row {
+      : edit_box { key = "jrt2_half_w"; label = "壁线距定位线半宽:"; edit_width = 10; }
+      : edit_box { key = "jrt2_end_r"; label = "端部喇叭R:"; edit_width = 10; }
+    }
+    : row {
       : edit_box { key = "jrt_inner_step"; label = "向内偏移步长:"; edit_width = 10; }
       : edit_box { key = "jrt_inner_count"; label = "内向偏移次数:"; edit_width = 10; }
     }
@@ -29,7 +33,7 @@ jrt_template_select : dialog {
   : boxed_radio_column {
     label = "模板";
     : radio_button { key = "tpl0"; label = "通用一 — 端帽按相邻通道内壁间距判定(RZ整圆帽/封闭线圆弧帽)"; }
-    : radio_button { key = "tpl1"; label = "通用二 — JRT源线朝JRTDW内嵌套(步长*次数)+出线口, 两头各一线连最内最外成闭环"; }
+    : radio_button { key = "tpl1"; label = "通用二 — JRT单壁线自动补边成闭合轮廓→朝JRTDW内嵌套(步长*次数)+出线口; 多段源线按手画轮廓处理"; }
   }
   : row {
     spacer; ok_button; cancel_button;

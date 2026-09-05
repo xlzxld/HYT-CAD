@@ -1,4 +1,9 @@
 ﻿;;; demo_recorder.lsp —— 演示记录器(手工操作日志工具, 工具菜单 DTDEMO 按需加载)
+;;; v1.1 (2026-09-06) 补盲区: 1) ESC/出错退出的命令也记录新建实体(此前只在
+;;;       正常结束时记, 用户按 ESC 退出 LINE/OFFSET/TRIM 时画的东西全丢);
+;;;       2) 每条命令记录被删除的实体(will-start 快照全库句柄, 结束时归并
+;;;       对比 —— 裁剪/删除的实体现可追溯); 3) 会话起点输出监视图层全量
+;;;       清单(INIT 行, 录制前已存在的实体也入库, 日志自包含)。
 ;;; v1.0 (2026-09-06) 首版
 ;;;
 ;;; 用途: 让 AI"看懂"你在 CAD 里手工做的操作。开启后挂命令级反应器,
@@ -25,6 +30,7 @@
 ;; *demo-on* T=录制中; *demo-cmd-reactor* / *demo-sv-reactor* 反应器
 ;; *demo-log-path* 日志路径; *demo-cur-cmd* 当前命令
 ;; *demo-marker* 命令开始前最后实体的句柄; *demo-n-* 统计
+;; *demo-snap* 本命令开始时的全库句柄快照(v1.1, 删除对比用)
 
 ;; getvar 兜底(参数化包装, 老版本静默返回 nil / 抛错均回退 fallback)
 (defun demo:gets (var fallback / v)
@@ -72,7 +78,7 @@
   )
 )
 
-;; 实体一行摘要
+;; 实体一行摘要(不含前缀, 调用方加 NEW/INIT)
 (defun demo:ent-info (e / ed tp ly hd fl g)
   (setq ed (entget e)
         tp (cdr (assoc 0 ed))
@@ -107,7 +113,64 @@
      (setq g (strcat " blk=" (cdr (assoc 2 ed))
                      " at=" (demo:pt-s (cdr (assoc 10 ed))))))
   )
-  (strcat "NEW " tp " layer=" (if ly ly "?") " h=" (if hd hd "?") g)
+  (strcat tp " layer=" (if ly ly "?") " h=" (if hd hd "?") g)
+)
+
+;; 监视图层(热流道相关层, INIT 清单与未来过滤用)
+(defun demo:watch-p (ly)
+  (member ly (list "JRT" "JRTDW" "FLB" "LS" "DK" "JT" "RZ" "ZJJ"
+                   "DP" "CX" "JTFBX" "FBX")))
+
+;; 全库句柄快照(will-start 调用): (句柄 类型 图层) 列表
+(defun demo:snap-all ( / e ed lst)
+  (setq e (entnext)
+        lst nil)
+  (while e
+    (setq ed (entget e)
+          lst (cons (list (cdr (assoc 5 ed)) (cdr (assoc 0 ed)) (cdr (assoc 8 ed)))
+                    lst)
+          e (entnext e)))
+  lst
+)
+
+;; 删除实体对比(快照 vs 当前库): 快照有而当前无 = 本命令删除的实体。
+;; 两份句柄表各自排序后线性归并, 大图不卡; 每个删除实体写一行 DEL。
+(defun demo:diff-del (snap / e cur a b out)
+  (setq e (entnext)
+        cur nil)
+  (while e
+    (setq cur (cons (cdr (assoc 5 (entget e))) cur)
+          e (entnext e)))
+  (setq cur (vl-sort cur '<)
+        snap (vl-sort snap '(lambda (x y) (< (car x) (car y))))
+        out nil)
+  (while (and snap cur)
+    (setq a (car snap)
+          b (car cur))
+    (cond
+      ((equal (car a) b) (setq snap (cdr snap) cur (cdr cur)))
+      ((< (car a) b) (setq out (cons a out) snap (cdr snap)))
+      (T (setq cur (cdr cur)))))
+  (while snap
+    (setq out (cons (car snap) out) snap (cdr snap)))
+  (foreach d out
+    (demo:writeline (strcat "DEL h=" (car d) " type=" (cadr d) " layer=" (caddr d))))
+  (length out)
+)
+
+;; 会话起点全量清单: 监视图层上的既有实体逐行 INIT(录前状态自包含)
+(defun demo:inventory ( / e ed ly n)
+  (setq e (entnext)
+        n 0)
+  (while e
+    (setq ed (entget e)
+          ly (cdr (assoc 8 ed)))
+    (if (demo:watch-p ly)
+      (progn
+        (demo:writeline (strcat "INIT " (demo:ent-info e)))
+        (setq n (1+ n))))
+    (setq e (entnext e)))
+  n
 )
 
 ;; 从 marker 之后遍历并记录本次命令新建的实体, 返回数量
@@ -127,7 +190,7 @@
     (setq e (entnext))
   )
   (while e
-    (demo:writeline (demo:ent-info e))
+    (demo:writeline (strcat "NEW " (demo:ent-info e)))
     (setq n (1+ n))
     (setq e (entnext e))
   )
@@ -144,6 +207,7 @@
       (setq *demo-cur-cmd* nm
             *demo-marker* (if (entlast) (cdr (assoc 5 (entget (entlast)))) nil))
       (demo:writeline (strcat "CMD " nm " start"))
+      (setq *demo-snap* (demo:snap-all))
       (setq *demo-n-cmd* (1+ *demo-n-cmd*))
     )
   )
@@ -155,6 +219,7 @@
     (progn
       (demo:writeline (strcat "CMD " nm " end"))
       (demo:dump-new)
+      (demo:diff-del *demo-snap*)
       (setq *demo-cur-cmd* nil)
     )
   )
@@ -165,6 +230,9 @@
   (if *demo-cur-cmd*
     (progn
       (demo:writeline (strcat "CMD " nm " aborted"))
+      ;; v1.1: ESC/出错退出同样记录新建与被删实体(此前只记命令名, 画的线全丢)
+      (demo:dump-new)
+      (demo:diff-del *demo-snap*)
       (setq *demo-cur-cmd* nil)
     )
   )
@@ -212,6 +280,9 @@
                                   (rtos (demo:gets "CDATE" 0.0) 2 8)
                                   " dwg=" (demo:gets "DWGNAME" "-") " ====") f)
               (close f)
+              ;; v1.1: 会话起点全量清单(录制前已存在的实体也入库)
+              (demo:writeline (strcat "==== INIT INVENTORY "
+                                      (itoa (demo:inventory)) " entities ===="))
               (if *demo-cmd-reactor* (vlr-remove *demo-cmd-reactor*))
               (if *demo-sv-reactor* (vlr-remove *demo-sv-reactor*))
               (setq *demo-cmd-reactor*
@@ -273,5 +344,5 @@
   (princ)
 )
 
-(princ "\n[DEMOREC] 演示记录器 v1.0 已加载: DEMOREC=开始, DEMOSTOP=结束, DEMOMARK=标注。")
+(princ "\n[DEMOREC] 演示记录器 v1.1 已加载: DEMOREC=开始, DEMOSTOP=结束, DEMOMARK=标注。")
 (princ)
