@@ -1,0 +1,24 @@
+==== DEMO SESSION 20260906.01561501 dwg=P99P1714.dwg ====
+CMD SETVAR start
+CMD SETVAR end
+CMD LINE start
+CMD LINE aborted
+==== MARK: 现在我手画好了加热条定位线 ====
+CMD OFFSET start
+CMD OFFSET aborted
+CMD PROPERTIES start
+CMD PROPERTIES end
+==== MARK: 现在我将定位线朝两边偏移16.5并将偏移出来的线改为JRT图层 ====
+CMD TRIM start
+CMD TRIM aborted
+CMD TRIM start
+CMD TRIM aborted
+==== MARK: 裁剪完成 接下来做圆角处理 默认12 ====
+CMD FILLET start
+CMD FILLET end
+NEW ARC layer=JRT h=3D6 c=(459.00,-65.18,0.00) r=12.00 a=0.0..1.6
+CMD FILLET start
+CMD FILLET end
+NEW ARC layer=JRT h=3D7 c=(459.00,-8.18,0.00) r=12.00 a=4.7..6.3
+==== MARK: 圆角处理完成 接下来我会调用加热条通用二来生成完整加热条和假体  ====
+==== DEMO END ====

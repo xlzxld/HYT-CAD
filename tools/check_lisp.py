@@ -130,6 +130,7 @@ JRT = JRT_COMMON + ['c:JRT', 'c:JRTPARAM', 'dt:jrt-param-dialog',
                 'dt:jrt2-free-ends',
                 'dt:jrt2-close', 'dt:jrt2-group', 'dt:jrt2-grp-touch',
                 'dt:jrt2-fillet2', 'dt:jrt2-neck', 'dt:jrt2-junction',
+                'dt:jrt2-flare-end', 'dt:jrt2-autobar',
                 'dt:rect-bbox']
 import os
 base = os.path.basename(P).lower()
