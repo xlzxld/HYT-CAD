@@ -1,5 +1,14 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.16
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.17
+;;; v9.17  : 修复 v9.16 运行报「调用(*push-error-using-command*)前无法从
+;;;          *error* 调用(command)」(坑 #69 在本文件的残留): ①根因 = 出线口
+;;;          交点解析误用 cadr 取 dt:cross-points 的返回对 (obj . pts) ——
+;;;          cadr 拿到的是首个交点(裸点), foreach 对其坐标数字求 distance
+;;;          抛类型错误, 异常传入 *error* 后其 (dt:jrt-undo-end) 非法
+;;;          调用掩盖了真错。改为 cdr 取交点列表 + cross-points 加 catch;
+;;;          ②本文件全部 (command "_.UNDO" "BE"/"E") 改 COM 撤销标记
+;;;          (dt:jrt-undo-mark/-end, 同 wx v2.2 坑 #69 定案), *error* 不再
+;;;          碰 (command); 用户建议的 command-s 会破坏 2007~2011 兼容故未采。
 ;;; v9.16  : 通用二「单线自动补边」按用户截图定稿重写(v9.15 把出线口误判为
 ;;;          "端部喇叭", 生成几何不符, 已废弃): 用户只画 ①外壁整圈(JRT 层;
 ;;;          请用直线/圆弧/开放多段线, 勿用闭合多段线) ②JRTDW 定位短线
@@ -133,6 +142,18 @@
 ;;; ============================================================================
 
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
+
+;; 坑 #69(v9.17): 撤销组统一走 COM 标记 —— *error* 与普通代码都不再碰
+;; (command); 无开放标记时 EndUndoMark 无副作用, 双重 catch 兜底
+(defun dt:jrt-undo-mark ( )
+  (vl-catch-all-apply
+    '(lambda ( )
+       (vla-StartUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
+
+(defun dt:jrt-undo-end ( )
+  (vl-catch-all-apply
+    '(lambda ( )
+       (vla-EndUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
 
 ;; ============================================================================
 ;; 加热条参数 —— 由 dt:jrt-param-table 驱动(默认值/预填/应用/恢复默认),
@@ -1258,13 +1279,13 @@
         (princ "\n【裁剪】本层没有对象, 无需裁剪。")
         (progn
           (setq pts-pairs (dt:cross-points vla-list))
-          (command "_.UNDO" "BE")
+          (dt:jrt-undo-mark)
           (setq trim-count 0 skip-count 0)
           (foreach pair pts-pairs
             (if (dt:jrt-trim-curve (car pair) (cdr pair) ld hw "JRT")
               (setq trim-count (1+ trim-count))
               (setq skip-count (1+ skip-count))))
-          (command "_.UNDO" "E")
+          (dt:jrt-undo-end)
           (princ (strcat "\n【裁剪】完成: 处理 " (itoa trim-count)
                          " 条线, 跳过 " (itoa skip-count) " 条。"))))))
   (princ))
@@ -1290,7 +1311,7 @@
         (progn
           (setq heads (dt:collect-heads vla-list nil)
                 pairs (dt:pair-heads heads))
-          (command "_.UNDO" "BE")
+          (dt:jrt-undo-mark)
           (setq count-ok 0 count-fail 0 count-dec 0)
           (foreach pair pairs
             (setq res (dt:jrt-fillet-pair (car pair) (cadr pair) ld hw "JRT" r))
@@ -1299,7 +1320,7 @@
                 (setq count-ok (1+ count-ok))
                 (if (< (car res) r) (setq count-dec (1+ count-dec))))
               (setq count-fail (1+ count-fail))))
-          (command "_.UNDO" "E")
+          (dt:jrt-undo-end)
           (princ (strcat "\n【圆角】发现 " (itoa (length pairs)) " 处断口: 成功 "
                          (itoa count-ok) " 处, 失败 " (itoa count-fail) " 处"
                          (if (> count-dec 0)
@@ -1347,7 +1368,7 @@
   (dt:jrt-trim ents hw)
   (setq ents (dt:jrt-diff snap))
   ;; 3) 端帽(圆帽/直线帽, 按 decide 环节的判定; 先建帽线/帽圆再修侧壁端头)
-  (command "_.UNDO" "BE")
+  (dt:jrt-undo-mark)
   (setq cnt-circle 0 cnt-line 0)
   (foreach plan plans
     (if (= (nth 5 plan) "circle")
@@ -1355,7 +1376,7 @@
              (setq cnt-circle (1+ cnt-circle)))
       (progn (dt:jrt-stage 'cap-line 'dt:jrt-cap-line (list plan ents hw inset capr))
              (setq cnt-line (1+ cnt-line)))))
-  (command "_.UNDO" "E")
+  (dt:jrt-undo-end)
   ;; 4) 统一断口圆角(交汇断口 + 直线帽两端直角交汇)
   (setq ents (dt:jrt-diff snap))
   (dt:jrt-fillet ents hw r)
@@ -1657,9 +1678,13 @@
   found)
 
 ;; 曲线与直线实体的交点列表(取该曲线一侧; 无交点 nil)
+;; v9.17: dt:cross-points 每对为 (obj . pts) —— 交点列表用 cdr 取(此前误用
+;; cadr 拿到首个交点裸点, foreach 对坐标数字求 distance 抛类型错误); 整体
+;; 加 catch, 求交异常按"无交点"降级跳过
 (defun dt:jrt2-line-x-curve (curve line / res pts)
-  (setq res (dt:cross-points (list curve line))
-        pts (if res (cadr (nth 0 res))))
+  (setq res (vl-catch-all-apply 'dt:cross-points (list (list curve line)))
+        pts (if (and res (not (vl-catch-all-error-p res)))
+              (cdr (nth 0 res))))
   (if (and pts (not (listp (car pts)))) (setq pts (list pts)))
   (if (and pts (> (length pts) 0)) pts nil))
 
@@ -1869,14 +1894,14 @@
                 layers (vla-get-layers doc))
           (dt:ensure-layer layers "JRT" 2 "黄色")
           ;; ---- 2) 删除上一轮产物(句柄记忆) ----
-          (command "_.UNDO" "BE")
+          (dt:jrt-undo-mark)
           (foreach h *jrt2-made*
             (if (handent h)
               (progn
                 (setq obj (vlax-ename->vla-object (handent h)))
                 (if (equal (vl-catch-all-apply 'vla-get-layer (list obj)) "JRT")
                   (vl-catch-all-apply 'vla-delete (list obj))))))
-          (command "_.UNDO" "E")
+          (dt:jrt-undo-end)
           ;; ---- 3) 源线过滤并组成"条" ----
           (setq srcs nil)
           (foreach obj (dt:layer-vlas "JRT")
@@ -1901,7 +1926,7 @@
           (setq made nil kmap nil nbar 0 nlayers 0 nclose 0)
           (foreach bar bars
             (setq nbar (1+ nbar))
-            (command "_.UNDO" "BE")
+            (dt:jrt-undo-mark)
             (setq bar-made nil
                   k 1
                   kmax (max 0 (fix *jrt-inner-count*)))
@@ -1931,7 +1956,7 @@
                   nclose (+ nclose (length clns)))
             (princ (strcat "\n【通用二】条 " (itoa nbar) ": 破口封闭 "
                            (itoa (length clns)) " 条(两头各连最外↔最内)。"))
-            (command "_.UNDO" "E"))
+            (dt:jrt-undo-end))
           ;; ---- 5.5) 出线口: JRTDW×FLB 颈线(通用二) ----
           (setq neck-ents (dt:jrt2-neck dw-vlas))
           (if neck-ents
@@ -2079,7 +2104,7 @@
     (princ "\n【提示】图层 \"FLB\" 不存在, 跳过出线口绘制。")
     (progn
       (setq jt-snap (dt:jrt-snapshot "JT"))   ; 原 JT 线快照(只裁这些)
-      (command "_.UNDO" "BE")
+      (dt:jrt-undo-mark)
       (foreach dwc dw-vlas
         (setq p-s (vlax-curve-getstartpoint dwc)
               p-e (vlax-curve-getendpoint dwc)
@@ -2201,7 +2226,7 @@
                     (princ "\n【警告】出线口: 相交处为弧段或未找到相接段, 暂不圆角。"))))))))
       (if (null out)
         (princ "\n【提示】JRTDW 与 FLB 无相交点, 跳过出线口绘制。"))
-      (command "_.UNDO" "E")
+      (dt:jrt-undo-end)
       out)))
 
 ;; ============================================================================
@@ -2453,7 +2478,8 @@
   ;; ---- 内部错误处理: 出错或按 ESC 中断时给出友好提示 ----
   ;; v9.14: 兜底闭合可能悬挂的 UNDO 组(无开放组时无副作用, catch 双保险)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda ( ) (command "_.UNDO" "E")))
+    ;; v9.17 坑 #69: *error* 内禁止 (command) —— 改用 COM 撤销标记收尾
+    (dt:jrt-undo-end)
     (princ (strcat "\n程序已停止: " (if msg msg "用户按 ESC 取消")))
     (princ)
   )
@@ -2481,9 +2507,9 @@
               (setq doc    (vla-get-activedocument (vlax-get-acad-object))
                     layers (vla-get-layers doc))
               (dt:ensure-layer layers "JRT" 2 "黄色")
-              (command "_.UNDO" "BE")
+              (dt:jrt-undo-mark)
               (setq total (dt:purge-layer "JRT"))
-              (command "_.UNDO" "E")
+              (dt:jrt-undo-end)
               (princ (strcat "\n已清理上一轮产物 " (itoa total)
                              " 个对象(\"JRT\"图层)。"))
               ;; 第 3 步: RZ 热咀圆检查(圆帽依赖; 缺失则全部直线帽)
@@ -2529,7 +2555,7 @@
 )
 ;;; 加载时在命令行输出提示
 (dt:jrt-cfg-boot)
-(princ "\n加热条自动绘制工具 v9.16 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.17 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
