@@ -38,3 +38,6 @@ desktop.ini
 scratch/
 test/
 temp/
+
+# 演示记录器日志(临时工作材料, 不入库)
+cad_demo_log.txt
