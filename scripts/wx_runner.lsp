@@ -20,7 +20,16 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.2
+;;; 版本: v2.3
+;;; v2.3  : 精雕/线切割排版改版(用户需求): ①精雕镜像改在本体右侧(竖直镜像轴,
+;;;          正反面间隔仍 75mm); ②精雕每幅(本体+镜像+文字)整体包络盒框住,
+;;;          独立图层"外协包络盒"(绿色 3), 文字生成后取实际 bbox 精确包络;
+;;;          ③排版改网格: 每行最多 4 幅, 行满向下追加(1234/5678), 列距/行距
+;;;          走 wx_runner.ini [排版] col_gap/row_gap(默认各 100mm); 排版游标
+;;;          存目标图纸 USERI5(幅数)/USERR5(上幅 Y 基线), 跨会话可靠续排,
+;;;          旧图纸无游标时自动从现有内容右侧续排; ④线切割仅改网格布局
+;;;          (不加包络盒)。新增 dt:sz-sysvar-get/set, dt:sz-mirror-in-curdoc
+;;;          签名改为任意轴两点。
 ;;; 平台: AutoCAD 2007 ~ 2026 (AutoLISP + COM ActiveX)
 ;;; ============================================================================
 
@@ -772,8 +781,7 @@
   "DT_WX_STYLE")
 
 ;; 确保指定文档中存在指定图层(直接访问目标文档 layers 集合, 彻底脱钩当前活动的 tblsearch)
-(defun dt:sz-ensure-doc-layer (doc name color / layers lay)
-  (setq layers (vla-get-layers doc))
+(defun dt:sz-ensure-doc-layer (doc name color / layers lay)  (setq layers (vla-get-layers doc))
   (setq lay (vl-catch-all-apply 'vla-item (list layers name)))
   (if (or (vl-catch-all-error-p lay) (null lay))
     (setq lay (vl-catch-all-apply 'vla-add (list layers name))))
@@ -782,6 +790,18 @@
   lay)
 
 ;; 在当前已打开的文档集合中按路径查找文档
+;; v2.3: 目标图纸排版游标读写 (USERI5=已排版幅数, USERR5=上一幅 Y 基线;
+;; 随 DWG 保存跨会话可靠; 读写均 catch 兜底)
+(defun dt:sz-sysvar-get (doc name def-val / r)
+  (setq r (vl-catch-all-apply 'vla-getvariable (list doc name)))
+  (if (or (vl-catch-all-error-p r) (null r))
+    def-val
+    (vlax-variant-value r)))
+
+(defun dt:sz-sysvar-set (doc name val)
+  (not (vl-catch-all-error-p
+         (vl-catch-all-apply 'vla-setvariable (list doc name val)))))
+
 (defun dt:sz-find-open-doc (path / acad docs full found p1 p2 d)
   (setq acad  (vlax-get-acad-object)
         docs  (vla-get-documents acad)
@@ -840,11 +860,9 @@
   a)
 
 ;; 在当前活动图纸中执行原生镜像 (优先 vla-mirror, 保底原生 _.MIRROR 命令)
-;; 镜像轴: 水平直线 Y=y-axis (即过点 (0, y-axis) 与 (100, y-axis))
-(defun dt:sz-mirror-in-curdoc (objs y-axis / p1 p2 m-objs new-o ss last-e e o)
-  (setq p1 (vlax-3d-point (list 0.0 y-axis 0.0))
-        p2 (vlax-3d-point (list 100.0 y-axis 0.0))
-        m-objs nil)
+;; v2.3: 镜像轴由调用方以任意两点 p1/p2 给出 (精雕用竖直轴实现右侧镜像)
+(defun dt:sz-mirror-in-curdoc (objs p1 p2 / m-objs new-o ss last-e e o)
+  (setq m-objs nil)
   ;; 1) 优先通过 COM vla-mirror 镜像 (当前文档具备完整 UCS 和视口, 速度极快)
   (foreach o objs
     (setq new-o (vl-catch-all-apply 'vla-mirror (list o p1 p2)))
@@ -861,8 +879,8 @@
         (if e (setq ss (ssadd e ss))))
       (setq last-e (entlast))
       (if (boundp 'command-s)
-        (command-s "_.MIRROR" ss "" (list 0.0 y-axis 0.0) (list 100.0 y-axis 0.0) "_N")
-        (vl-cmdf "_.MIRROR" ss "" (list 0.0 y-axis 0.0) (list 100.0 y-axis 0.0) "_N"))
+        (command-s "_.MIRROR" ss "" p1 p2 "_N")
+        (vl-cmdf "_.MIRROR" ss "" p1 p2 "_N"))
       (setq m-objs nil)
       (while (setq last-e (entnext last-e))
         (setq m-objs (cons (vlax-ename->vla-object last-e) m-objs)))
@@ -872,16 +890,21 @@
 ;; is-auto: T=自动提取图层, nil=手动框选(手动模式 100% 全保留)
 (defun dt:sz-export-to-dwg (cands title target-layer is-auto /
                             cur-doc acad docs target-path tgt-doc
-                            ms-tgt existing-bb ins-x rot-ang
+                            ms-tgt existing-bb ins-x ins-y rot-ang
                             front-objs back-objs export-objs o c
                             src-bb s-minx s-miny s-maxx s-maxy part-w part-h
                             off-x off-y sa r
                             tmp-dir tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
-                            src-fname src-multiline title-cx title-cy title-w txt-obj save-res)
+                            src-fname src-multiline title-cx title-cy title-w txt-obj save-res
+                            col-gap row-gap grid-n grid-col grid-row last-y
+                            unit-w ax bx1 by1 bx2 by2 txt-bb box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
-        docs    (vla-get-documents acad))
+        docs    (vla-get-documents acad)
+        ;; v2.3: 排版间距参数(wx_runner.ini [排版], 默认各 100mm)
+        col-gap (atof (dt:sz-cfg-get "排版" "col_gap" "100.0"))
+        row-gap (atof (dt:sz-cfg-get "排版" "row_gap" "100.0")))
 
   ;; 0) 预先探测源图形的整体倾斜角 (用于后续正交旋转摆正)
   (setq rot-ang (dt:sz-detect-tilt-angle cands))
@@ -923,11 +946,25 @@
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
               (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 210)))
 
-          ;; 3) 扫描目标图纸现有图元包络盒(实现向右安全平铺，间距 150mm)
-          (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc))
-          (if existing-bb
-            (setq ins-x (+ (caddr existing-bb) 150.0)) ; 已有图形最右侧 + 150mm
-            (setq ins-x 0.0))                          ; 若图纸为空(首个工件), 起点 X = 0.0
+          ;; 3) v2.3 网格排版: 每行最多 4 幅, 行满向下追加(1234/5678)。
+          ;;    游标存目标图纸 USERI5(已排版幅数)/USERR5(上幅 Y 基线),
+          ;;    随 DWG 保存跨会话可靠; 旧图纸无游标时从现有内容右侧续排
+          (setq grid-n   (dt:sz-sysvar-get tgt-doc "USERI5" 0)
+                last-y   (dt:sz-sysvar-get tgt-doc "USERR5" 0.0)
+                existing-bb (dt:sz-doc-ms-bbox tgt-doc)
+                grid-col (rem grid-n 4)
+                grid-row (/ grid-n 4))
+          (cond
+            ((and (= grid-n 0) existing-bb)
+             (setq ins-x (+ (caddr existing-bb) col-gap)   ; 旧图纸迁移: 从现有内容右侧续排
+                   ins-y 0.0))
+            ((= grid-col 0)
+             (if (= grid-n 0)
+               (setq ins-x 0.0 ins-y 0.0)                  ; 首幅
+               (setq ins-x 0.0 ins-y (- last-y row-gap)))) ; 行满换行: 向下追加
+            (T
+             (setq ins-x (+ (if existing-bb (caddr existing-bb) 0.0) col-gap) ; 行内向右
+                   ins-y last-y)))
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
@@ -975,11 +1012,15 @@
                   (foreach o front-objs
                     (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list off-x off-y 0.0))))
 
-                  ;; 4d. 精雕正反面镜像 (在当前文档中调用原生镜像，镜像轴 Y = -37.5，间隔严格 75mm)
+                  ;; 4d. 精雕正反面镜像 (v2.3: 镜像改在本体右侧, 竖直镜像轴, 间隔 75mm)
                   (setq back-objs nil)
                   (if (equal title "精雕")
                     (progn
-                      (setq back-objs (dt:sz-mirror-in-curdoc front-objs -37.5))
+                      (setq ax (+ part-w 37.5))
+                      (setq back-objs (dt:sz-mirror-in-curdoc
+                                        front-objs
+                                        (vlax-3d-point (list ax 0.0 0.0))
+                                        (vlax-3d-point (list ax 100.0 0.0))))
                       ;; 图层分离规则:
                       (if is-auto
                         (progn
@@ -1003,11 +1044,14 @@
                         ;; 手动框选模式: 100% 全部保留，正反面均不执行任何删除
                         nil)))
 
-                  ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 X=ins-x
-                  (setq export-objs (append front-objs back-objs))
-                  (if (> ins-x 0.0)
+                  ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
+                  (setq export-objs (append front-objs back-objs)
+                        unit-w (if (equal title "精雕")
+                                 (+ (* 2.0 part-w) 75.0)
+                                 part-w))
+                  (if (or (> ins-x 0.0) (/= ins-y 0.0))
                     (foreach o export-objs
-                      (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list ins-x 0.0 0.0)))))
+                      (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list ins-x ins-y 0.0)))))
 
                   ;; 5) 原子级跨图纸深拷贝 (CopyObjects, 异常回退 WBLOCK)
                   (setq sa (vlax-make-safearray vlax-vbObject (cons 0 (1- (length export-objs)))))
@@ -1041,9 +1085,9 @@
                   (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
                   (if (or (null src-fname) (= src-fname "")) (setq src-fname "未命名工件"))
                   (setq src-multiline (dt:sz-format-multiline src-fname))
-                  (setq title-cx (+ ins-x (* 0.5 part-w))
-                        title-cy (+ part-h 50.0)
-                        title-w  (max 80.0 (min part-w 220.0)))
+                  (setq title-cx (+ ins-x (* 0.5 unit-w))
+                        title-cy (+ ins-y part-h 50.0)
+                        title-w  (max 80.0 (min unit-w 220.0)))
                   (setq txt-obj (vl-catch-all-apply
                                   'vla-addmtext
                                   (list ms-tgt (vlax-3d-point (list title-cx title-cy 0.0)) title-w src-multiline)))
@@ -1059,7 +1103,35 @@
                     (if (vl-catch-all-error-p txt-obj)
                       (princ (strcat "\n【" title "】生成标注文字警告: " (vl-catch-all-error-message txt-obj)))))
 
-                  ;; 8) 保存目标图纸并刷新
+                  ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 绿色 3)
+                  (if (equal title "精雕")
+                    (progn
+                      (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 3)
+                      (setq txt-bb (if (and txt-obj (not (vl-catch-all-error-p txt-obj)))
+                                     (dt:rect-bbox (list txt-obj)))
+                            bx1 (- ins-x 20.0)
+                            by1 (- ins-y 20.0)
+                            bx2 (+ ins-x unit-w 20.0)
+                            by2 (if txt-bb
+                                  (+ (cadddr txt-bb) 20.0)
+                                  (+ ins-y part-h 130.0)))
+                      (setq box-obj (vl-catch-all-apply
+                                      'vla-addlightweightpolyline
+                                      (list ms-tgt
+                                            (vlax-make-variant
+                                              (vlax-safearray-fill
+                                                (vlax-make-safearray vlax-vbDouble (cons 0 7))
+                                                (list bx1 by1 bx2 by1 bx2 by2 bx1 by2))
+                                              (logior vlax-vbArray vlax-vbDouble)))))
+                      (if (and box-obj (not (vl-catch-all-error-p box-obj)))
+                        (progn
+                          (vla-put-closed box-obj :vlax-true)
+                          (vla-put-layer box-obj "外协包络盒"))
+                        (princ "\n【精雕】包络盒生成警告(工件本身不受影响)。"))))
+
+                  ;; 8) v2.3: 排版游标回写(幅数+1, Y 基线), 之后保存目标图纸并刷新
+                  (dt:sz-sysvar-set tgt-doc "USERI5" (1+ grid-n))
+                  (dt:sz-sysvar-set tgt-doc "USERR5" ins-y)
                   (setq save-res (vl-catch-all-apply 'vla-save (list tgt-doc)))
                   (if (vl-catch-all-error-p save-res)
                     (setq save-res (vl-catch-all-apply 'vla-saveas (list tgt-doc target-path))))
@@ -1069,8 +1141,12 @@
 
                   (princ "\n------------------------------------------------------------")
                   (princ (strcat "\n【" title "】工件已成功输出并排版至: " target-path))
-                  (princ (strcat "\n【" title "】排版起点 X = " (rtos ins-x 2 2)
-                                 " (安全间距 150mm, 倾斜图形已摆正, 正反面间隔严格 75mm, 上方已标注文件名)"))
+                  (princ (strcat "\n【" title "】排版位置: 第 " (itoa (1+ grid-row))
+                                 " 行第 " (itoa (1+ grid-col)) " 幅 (X=" (rtos ins-x 2 2)
+                                 " Y=" (rtos ins-y 2 2) ", 列距/行距 " (rtos col-gap 2 0) "/"
+                                 (rtos row-gap 2 0) "mm"
+                                 (if (equal title "精雕") ", 镜像在右侧 75mm, 已加包络盒" "")
+                                 ", 上方已标注文件名)"))
                   (princ "\n------------------------------------------------------------")
                   T)))))))))
 
@@ -1391,5 +1467,5 @@
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.2 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.3 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)

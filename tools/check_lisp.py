@@ -133,6 +133,7 @@ JRT = JRT_COMMON + ['c:JRT', 'c:JRTPARAM', 'dt:jrt-param-dialog',
                 'dt:jrt2-hooks', 'dt:jrt2-hook-one', 'dt:jrt2-hook-arc',
                 'dt:jrt2-offset-line', 'dt:jrt2-ch-exist', 'dt:jrt2-trim-line',
                 'dt:jrt2-line-x-curve', 'dt:jrt2-wall-tan', 'dt:jrt2-near-pt',
+                'dt:jrt-undo-mark', 'dt:jrt-undo-end',
                 'dt:rect-bbox']
 import os
 base = os.path.basename(P).lower()
@@ -150,7 +151,7 @@ WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
       'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
       'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
       'dt:sz-draw-box-dim', 'dt:sz-gets', 'dt:sz-ensure-style',
-      'dt:sz-export-to-dwg']
+      'dt:sz-export-to-dwg', 'dt:sz-sysvar-get', 'dt:sz-sysvar-set']
 # demo_recorder 演示记录器(独立小工具: 命令反应器日志, 无几何库/无对话框)
 DEMO = ['c:DEMOREC', 'c:DEMOSTOP', 'c:DEMOMARK',
         'demo:gets', 'demo:canon', 'demo:skip-p', 'demo:writeline', 'demo:pt-s',
