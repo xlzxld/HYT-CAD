@@ -106,7 +106,10 @@ CX = [n for n in COMMON if n != 'dt:fillet-pair'] + \
         'dt:break-curve', 'dt:collect-ends', 'dt:cx-trim',
         'dt:cx-fillet-all', 'dt:cx-extend-fixed',
         'dt:cx-first-cross', 'dt:cx-join', 'dt:near-src-fwd',
-        'dt:cx-close', 'dt:cx-cxk', 'dt:cx-process']
+        'dt:cx-close', 'dt:cx-cxk', 'dt:cx-process',
+        'dt:cx-yxb', 'dt:cx-yxb-wall', 'dt:cx-yxb-find-wall',
+        'dt:cx-yxb-draw', 'dt:cx-yxb-clash', 'dt:cx-yxb-cands',
+        'dt:cx-undo-mark', 'dt:cx-undo-end']
 # JRT(加热条)脚本: 与 COMMON 的差异 —— 对话框函数用 dt:jrt-* 改名隔离,
 # 不含封口链(dt:end-free); cut-curve/trim-curve/fillet-pair 因 slot 版
 # 签名/默认值不同也改名隔离(详见 AGENTS.md 双脚本架构说明)
