@@ -4,20 +4,16 @@ jrt_param : dialog {
   : boxed_column {
     label = "加热条参数";
     : row {
-      : edit_box { key = "jrt2_half_w"; label = "壁线距定位线半宽:"; edit_width = 10; }
-      : edit_box { key = "jrt2_end_r"; label = "端部喇叭R:"; edit_width = 10; }
+      : edit_box { key = "jrt_offset"; label = "流道线偏移距离:"; edit_width = 10; }
+      : edit_box { key = "jrt_cap_inset"; label = "封闭线内偏移距离:"; edit_width = 10; }
+    }
+    : row {
+      : edit_box { key = "jrt_fillet_r"; label = "圆角半径R:"; edit_width = 10; }
+      : edit_box { key = "jrt_cap_r"; label = "封闭线圆角半径R:"; edit_width = 10; }
     }
     : row {
       : edit_box { key = "jrt_inner_step"; label = "向内偏移步长:"; edit_width = 10; }
       : edit_box { key = "jrt_inner_count"; label = "内向偏移次数:"; edit_width = 10; }
-    }
-    : row {
-      : edit_box { key = "jrt2_neck_len"; label = "出线颈线长度:"; edit_width = 10; }
-      : edit_box { key = "jrt2_neck_off"; label = "出线颈线偏移:"; edit_width = 10; }
-    }
-    : row {
-      : edit_box { key = "jrt2_close_r"; label = "出线封口圆角R:"; edit_width = 10; }
-      : edit_box { key = "jrt2_trim_r"; label = "出线相交圆角R:"; edit_width = 10; }
     }
   }
   : row {
