@@ -6,7 +6,7 @@ scripts\ 里的 .lsp 是 UTF-8 with BOM 编码(2021+ 的 AutoCAD 需要);
 
 部署(2007~2020 机器):
   1. 把整个 CAD 文件夹拷过去;
-  2. 用本目录 4 个 .lsp 覆盖 scripts\ 下同名文件(文件名相同, 直接替换);
+  2. 用本目录 6 个 .lsp 覆盖 scripts\ 下同名文件(文件名相同, 直接替换);
   3. APPLOAD scripts\dt_start.lsp -> DTINSTALL。其余步骤与 README 相同。
 
 2021 及以上版本的 AutoCAD 不要用本目录, 用 scripts\ 里的原版。

@@ -7,7 +7,7 @@
 > **按版本选文件（重要）**：
 > - AutoCAD **2021 及以上**用 `scripts\` 里的脚本（UTF-8 with BOM 编码，现代 Unicode LISP 引擎原生支持）；
 > - AutoCAD **2007 ~ 2020** 车间老旧电脑必须用 `scripts_ansi\` 里的同名脚本（GBK 编码，拷贝时覆盖到 `scripts\` 再加载）——老版 CAD 读 UTF-8 会报「错误: 输入中的点位置不正确」。
-> 当前版本：flb_runner **v10.8** / cx_runner **v10.4** / jrt_runner **v9.14** / wx_runner **v2.2** / dt_start **v3.0**
+> 当前版本：flb_runner **v10.8** / cx_runner **v10.4** / jrt_runner **v9.14** / wx_runner **v2.2** / dt_start **v3.1** / demo_recorder **v1.0**
 > （v2.9 = 低版本安装报错修复，AutoCAD **2007 实测通过**；详见第 7 节「版本兼容」）。
 
 ---
@@ -23,6 +23,7 @@
 | `scripts\cx_runner.lsp` | 出线槽绘制（CX 命令，兼容 SLOT）：通道壁/裁剪/大小圆角/封闭/CXK 分流 | 不能删 |
 | `scripts\jrt_runner.lsp` | 加热条绘制（JRT 命令）：多层嵌套轮廓/端帽/出线口 | 不能删 |
 | `scripts\wx_runner.lsp` | 外协加工与测量（FLBSZ/XQG/JD/SJTZ 命令）：分流板尺寸测量/线切割出图/精雕出图/数据图纸 | 不能删 |
+| `scripts\demo_recorder.lsp` | 演示记录器（DTDEMO 命令）：把手工操作录成命令/拾取点/新建实体日志给 AI 改逻辑用 | 开发者用（可删，工具菜单会提示找不到） |
 | `scripts_ansi\`（目录） | **低版本 CAD 专用目录**：包含 5 个脚本的 ANSI/GBK 编码副本（供 2007~2020 老电脑使用） | 不能删 |
 | `scriptslb_runner.ini` | 分流板**参数默认值**（记事本可改，详见第 6 节） | 可删（回内置默认后重新生成） |
 | `scripts\cx_runner.ini` | 出线槽参数默认值 | 同上 |
@@ -61,6 +62,7 @@
 | 工具▸安装自启 / 卸载工具箱 | `DTINSTALL` / `DTUNINSTALL` | 装 / 卸自启动（卸载=菜单/钩子/路径全还原） |
 | 工具▸诊断 | `DTDBG` | 加载/对话框报错时排查 |
 | 工具▸打开脚本目录 | — | 资源管理器打开本文件夹 |
+| 工具▸演示记录器 | `DTDEMO` | 录制手工操作给 AI 分析（日志 cad_demo_log.txt 在图纸目录；录制中可用 `DEMOMARK` 打文字标注） |
 
 换电脑部署：把**整个 CAD 文件夹**（含 scripts/scripts_ansi/tools 子目录）拷过去。
 - **新电脑是 AutoCAD 2021 及以上**：直接 APPLOAD `scripts\dt_start.lsp` 然后执行 `DTINSTALL` 一次即可；

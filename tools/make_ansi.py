@@ -11,7 +11,7 @@ Unicode LISP 正确解码)。≤2020 的 AutoCAD 是 MBCS(GBK) LISP, 其读取�
       个别显示字符串里的 4 个非 GBK 装饰符号做等价替换), 并用"逐字节读取器
       模拟"校验副本与原件的字符串/括号结构完全一致; 任何一步失败即退出码 1。
 
-部署: ≤2020 机器用 scripts_ansi\\ 的四个 .lsp 覆盖 scripts\\ 下同名文件(整个
+部署: ≤2020 机器用 scripts_ansi\\ 的六个 .lsp 覆盖 scripts\\ 下同名文件(整个
       文件夹照常拷贝), APPLOAD + DTINSTALL; 2021+ 机器用 UTF-8 原版。
       scripts_ansi 不在支持路径上, 勿加入 2021+ 机器的支持路径(坑 #35)。
 注意: check_lisp.py/_audit.py/_collide.py 只针对 UTF-8 原件; GBK 副本由本工具
@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 SRC = os.path.join(ROOT, 'scripts')
 DST = os.path.join(ROOT, 'scripts_ansi')
-FILES = ['dt_start.lsp', 'flb_runner.lsp', 'cx_runner.lsp', 'jrt_runner.lsp', 'wx_runner.lsp']
+FILES = ['dt_start.lsp', 'flb_runner.lsp', 'cx_runner.lsp', 'jrt_runner.lsp', 'wx_runner.lsp', 'demo_recorder.lsp']
 
 # 仅注释与个别显示字符串中出现的非 GBK 装饰符号 -> GBK 等价写法(代码区纯 ASCII 不受影响)
 REPL = {'▸': '>', '⇒': '=>', '²': '^2', '↔': '<->', 'ø': '%%c'}
@@ -38,7 +38,7 @@ scripts\\ 里的 .lsp 是 UTF-8 with BOM 编码(2021+ 的 AutoCAD 需要);
 
 部署(2007~2020 机器):
   1. 把整个 CAD 文件夹拷过去;
-  2. 用本目录 4 个 .lsp 覆盖 scripts\\ 下同名文件(文件名相同, 直接替换);
+  2. 用本目录 6 个 .lsp 覆盖 scripts\\ 下同名文件(文件名相同, 直接替换);
   3. APPLOAD scripts\\dt_start.lsp -> DTINSTALL。其余步骤与 README 相同。
 
 2021 及以上版本的 AutoCAD 不要用本目录, 用 scripts\\ 里的原版。

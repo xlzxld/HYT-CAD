@@ -1,12 +1,13 @@
 ;;; ============================================================================
-;;; dt_start.lsp  v2.9 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
-;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner 脚本同目录,
+;;; dt_start.lsp  v3.1 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
 ;;;   DTINSTALL   安装自启(写 acaddoc.lsp 钩子 + 加入支持/受信任路径), 装完立即可用
 ;;;   DTRELOAD    换了新版本脚本后, 不重启 CAD 立即重新扫描加载最新版(顺带重挂菜单)
 ;;;   DTUNINSTALL 彻底卸载(摘菜单 + 删钩子 + 移出支持/受信任路径), CAD 配置恢复原样
 ;;;   DTDBG       对话框链路逐步诊断(定位 stringp 类错误)
+;;;   DTDEMO      演示记录器(v3.1): 按需加载 demo_recorder.lsp 并开/关录制
 ;;; 菜单(v2.1): 顶栏「热流道自动化(R)」, 二级分组(分流板/加热条/出线槽/工具/关于);
 ;;;   COM 内存构建不落盘、不动主 CUI, 每次引导加载成功后自动挂出。
 ;;; v2.7 要点: 菜单二级顺序调整 —— 加热条挪到出线槽上面(用户频率排序);
@@ -26,6 +27,11 @@
 ;;;      支持路径最前, 保证 AutoCAD 能搜到它 —— 它只加载搜到的第一个);
 ;;;   3) dt:st-trusted-add/-del 补 null 判断(老版本无安全拦截机制 -> 跳过);
 ;;;   4) DTDBG 增环境探测段: ACADVER + 各系统变量可用性 + acaddoc.lsp 落点。
+;;; v3.1 要点: 工具子菜单新增「演示记录器」—— c:DTDEMO 按需加载
+;;;   scripts\demo_recorder.lsp(不随启动加载: 反应器工具常驻无必要)并
+;;;   开/关录制, 把手工操作的命令/拾取点/新建实体录成日志给 AI 改逻辑用;
+;;;   dt:st-about 命令清单同步。版本串 v2.9→v3.1(README/AGENTS_CAD 已按
+;;;   v3.0 记账, 磁盘版本串本次一并对齐)。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -81,7 +87,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v2.9")     ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.1")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -455,7 +461,7 @@
 ;;   ├ 分流板> 画分流板(OFF) / 分流板参数(PARAM)
 ;;   ├ 出线槽> 画出线槽(SLOT) / 出线槽参数(SLOTPARAM)
 ;;   ├ 加热条> 画加热条(JRT) / 加热条参数(JRTPARAM)
-;;   ├ 工具> 重载脚本/诊断/安装自启/卸载工具箱/打开脚本目录
+;;   ├ 工具> 重载脚本/诊断/安装自启/卸载工具箱/打开脚本目录/演示记录器
 ;;   └ 关于...
 ;; 全程 vl-catch-all 保护: 菜单失败只降级为无菜单, 脚本命令不受影响。
 ;; ---------------------------------------------------------------------------
@@ -477,7 +483,7 @@
     (if (cadddr fam)
       (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 画图 / " (cadddr fam) " 参数"))
       (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 测量分流板(长宽/下料/标注)"))))
-  (setq s (strcat s "\n  工具: DTRELOAD 刷新 / DTINSTALL 安装 / DTUNINSTALL 卸载 / DTDBG 诊断"))
+  (setq s (strcat s "\n  工具: DTRELOAD 刷新 / DTINSTALL 安装 / DTUNINSTALL 卸载 / DTDBG 诊断 / DTDEMO 演示记录"))
   (alert s)
   (princ))
 
@@ -576,6 +582,7 @@
          (vla-addmenuitem sub 2 "安装自启(&I)" (dt:st-macro "(c:DTINSTALL)"))
          (vla-addmenuitem sub 3 "卸载工具箱(&U)" (dt:st-macro "(c:DTUNINSTALL)"))
          (vla-addmenuitem sub 4 "打开脚本目录(&O)" (dt:st-macro "(dt:st-open-dir)"))
+         (vla-addmenuitem sub 5 "演示记录器(&M)" (dt:st-macro "(c:DTDEMO)"))
          (setq idx (1+ idx))
          ;; 关于
          (vla-addseparator popMain idx)
@@ -657,6 +664,24 @@
 (defun c:DTRELOAD ( )
   (princ "\n【刷新】重新扫描加载最新版本...")
   (dt:st-boot T))
+
+;; 演示记录器(v3.1): 按需加载 scripts\demo_recorder.lsp 并 开/关 录制。
+;; 不进家族表不随启动加载(反应器工具常驻无必要); 文件缺失时明确提示。
+(defun c:DTDEMO ( / dir f)
+  (cond
+    (*demo-on* (c:DEMOSTOP))
+    ((null demo:gets)
+     (setq dir (dt:st-locate))
+     (cond
+       ((null dir)
+        (princ "\n【演示】未定位到脚本目录, 无法加载 demo_recorder.lsp。"))
+       ((null (setq f (dt:st-pick dir "demo_recorder")))
+        (princ "\n【演示】脚本目录里没有 demo_recorder.lsp。"))
+       ((vl-catch-all-error-p (vl-catch-all-apply 'load (list (strcat dir "\\" f))))
+        (princ "\n【演示】demo_recorder.lsp 加载失败, 报错见命令行。"))
+       (T (c:DEMOREC))))
+    (T (c:DEMOREC)))
+  (princ))
 
 ;; 诊断命令(v2.0): 打印目录/选版信息 + 逐步执行 offset 参数对话框链路,
 ;; 定位"stringp"类错误的确切位置。
@@ -757,6 +782,6 @@
   (princ))
 
 ;;; 加载提示
-(princ "\ndt_start v2.9 已加载: DTINSTALL 安装自启 / DTRELOAD 刷新 / DTUNINSTALL 卸载 / DTDBG 诊断。")
+(princ "\ndt_start v3.1 已加载: DTINSTALL 安装自启 / DTRELOAD 刷新 / DTUNINSTALL 卸载 / DTDBG 诊断 / DTDEMO 演示记录。")
 (princ "\n安装后顶栏出现「热流道自动化(R)」菜单; (升级安装: 先 DTUNINSTALL 清旧钩子, 再 DTINSTALL。)")
 (princ)

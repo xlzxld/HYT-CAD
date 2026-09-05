@@ -148,6 +148,11 @@ WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
       'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
       'dt:sz-draw-box-dim', 'dt:sz-gets', 'dt:sz-ensure-style',
       'dt:sz-export-to-dwg']
+# demo_recorder 演示记录器(独立小工具: 命令反应器日志, 无几何库/无对话框)
+DEMO = ['c:DEMOREC', 'c:DEMOSTOP', 'c:DEMOMARK',
+        'demo:gets', 'demo:canon', 'demo:skip-p', 'demo:writeline', 'demo:pt-s',
+        'demo:ent-info', 'demo:dump-new',
+        'demo:cmd-will-start', 'demo:cmd-ended', 'demo:cmd-abort', 'demo:sv-changed']
 
 if 'dt_start' in base:
     need = DTSTART
@@ -157,6 +162,8 @@ elif 'jrt' in base:
     need = JRT
 elif 'wx' in base or 'size' in base:
     need = WX
+elif 'demo' in base:
+    need = DEMO
 else:
     need = PLATE
 missing = [n for n in need if '(defun %s' % n not in code]
