@@ -154,7 +154,7 @@ WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
       'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
       'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
       'dt:sz-draw-box-dim', 'dt:sz-gets', 'dt:sz-ensure-style',
-      'dt:sz-export-to-dwg', 'dt:sz-sysvar-get', 'dt:sz-sysvar-set']
+      'dt:sz-export-to-dwg', 'dt:sz-doc-texts']
 # demo_recorder 演示记录器(独立小工具: 命令反应器日志, 无几何库/无对话框)
 DEMO = ['c:DEMOREC', 'c:DEMOSTOP', 'c:DEMOMARK',
         'demo:gets', 'demo:canon', 'demo:skip-p', 'demo:writeline', 'demo:pt-s',

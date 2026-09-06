@@ -20,7 +20,16 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.3
+;;; 版本: v2.4
+;;; v2.4  : 修复排版网格重叠/乱飘 + 包络盒首幅颜色(用户实测反馈):
+;;;         ①排版游标弃用跨文档系统变量(USERI5/USERR5 在非活动文档上
+;;;           读写不可靠 —— 重叠/乱飘根因), 改纯几何推导: 以目标图
+;;;           "外协文字"层 MText 为单位标记(每幅 1 个), 当前行 = 插入点
+;;;           Y 最小的行, 行内 <4 幅行内追加(与行顶对齐), 满 4 幅向下
+;;;           换行; 对旧图纸/跨会话天然正确;
+;;;         ②包络盒实体级 vla-put-color 3(图层色在非活动文档不即时
+;;;           生效 —— 首幅显示灰/黑根因), 首幅即显绿色。
+;;;         新增 dt:sz-doc-texts; 移除 dt:sz-sysvar-get/set。
 ;;; v2.3  : 精雕/线切割排版改版(用户需求): ①精雕镜像改在本体右侧(竖直镜像轴,
 ;;;          正反面间隔仍 75mm); ②精雕每幅(本体+镜像+文字)整体包络盒框住,
 ;;;          独立图层"外协包络盒"(绿色 3), 文字生成后取实际 bbox 精确包络;
@@ -790,17 +799,20 @@
   lay)
 
 ;; 在当前已打开的文档集合中按路径查找文档
-;; v2.3: 目标图纸排版游标读写 (USERI5=已排版幅数, USERR5=上一幅 Y 基线;
-;; 随 DWG 保存跨会话可靠; 读写均 catch 兜底)
-(defun dt:sz-sysvar-get (doc name def-val / r)
-  (setq r (vl-catch-all-apply 'vla-getvariable (list doc name)))
-  (if (or (vl-catch-all-error-p r) (null r))
-    def-val
-    (vlax-variant-value r)))
-
-(defun dt:sz-sysvar-set (doc name val)
-  (not (vl-catch-all-error-p
-         (vl-catch-all-apply 'vla-setvariable (list doc name val)))))
+;; v2.4: 收集目标图纸指定图层上的 MText 实体(排版网格的单位标记:
+;; 每幅输出的工件恰好带 1 个文件名标注文字)
+(defun dt:sz-doc-texts (doc layer / ms i n o out)
+  (setq ms (vla-get-modelspace doc)
+        n  (vla-get-count ms)
+        i  0
+        out nil)
+  (while (< i n)
+    (setq o (vla-item ms i))
+    (if (and (= (vla-get-objectname o) "AcDbMText")
+             (= (strcase (vla-get-layer o)) (strcase layer)))
+      (setq out (cons o out)))
+    (setq i (1+ i)))
+  (reverse out))
 
 (defun dt:sz-find-open-doc (path / acad docs full found p1 p2 d)
   (setq acad  (vlax-get-acad-object)
@@ -897,7 +909,7 @@
                             tmp-dir tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
-                            col-gap row-gap grid-n grid-col grid-row last-y
+                            col-gap row-gap grid-n grid-col txt-list txt-min-y y-top ip-t
                             unit-w ax bx1 by1 bx2 by2 txt-bb box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
@@ -946,25 +958,35 @@
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
               (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 210)))
 
-          ;; 3) v2.3 网格排版: 每行最多 4 幅, 行满向下追加(1234/5678)。
-          ;;    游标存目标图纸 USERI5(已排版幅数)/USERR5(上幅 Y 基线),
-          ;;    随 DWG 保存跨会话可靠; 旧图纸无游标时从现有内容右侧续排
-          (setq grid-n   (dt:sz-sysvar-get tgt-doc "USERI5" 0)
-                last-y   (dt:sz-sysvar-get tgt-doc "USERR5" 0.0)
-                existing-bb (dt:sz-doc-ms-bbox tgt-doc)
-                grid-col (rem grid-n 4)
-                grid-row (/ grid-n 4))
+          ;; 3) v2.4 网格排版(纯几何推导, 无跨文档状态): 单位标记 = "外协文字"
+          ;;    层 MText(每幅恰好 1 个)。当前行 = 插入点 Y 最小的文字所在行;
+          ;;    行内 <4 幅 → 行内追加(x = 图纸 maxx + col_gap, 与行顶对齐);
+          ;;    已满 4 幅 → 向下换行(x = 0, y_top = 图纸 miny - row_gap)。
+          ;;    基线在 part_h 求出后回填(4e 步), y_top 先记录。
+          (setq txt-list (dt:sz-doc-texts tgt-doc "外协文字")
+                grid-n   (length txt-list)
+                txt-min-y 1e99)
+          (foreach o txt-list
+            (setq ip-t (vlax-safearray->list
+                         (vlax-variant-value (vla-get-insertionpoint o))))
+            (if (< (cadr ip-t) txt-min-y) (setq txt-min-y (cadr ip-t))))
+          (setq grid-col 0)
+          (foreach o txt-list
+            (setq ip-t (vlax-safearray->list
+                         (vlax-variant-value (vla-get-insertionpoint o))))
+            (if (< (abs (- (cadr ip-t) txt-min-y)) 1.0)
+              (setq grid-col (1+ grid-col))))
           (cond
-            ((and (= grid-n 0) existing-bb)
-             (setq ins-x (+ (caddr existing-bb) col-gap)   ; 旧图纸迁移: 从现有内容右侧续排
-                   ins-y 0.0))
-            ((= grid-col 0)
-             (if (= grid-n 0)
-               (setq ins-x 0.0 ins-y 0.0)                  ; 首幅
-               (setq ins-x 0.0 ins-y (- last-y row-gap)))) ; 行满换行: 向下追加
+            ((= grid-n 0)
+             (setq ins-x 0.0 y-top 0.0))                      ; 首幅(基线 0, 4e 回填)
+            ((< grid-col 4)
+             (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc)
+                   ins-x (+ (if existing-bb (caddr existing-bb) 0.0) col-gap)
+                   y-top (- txt-min-y 50.0)))                 ; 行内追加: 与行顶对齐
             (T
-             (setq ins-x (+ (if existing-bb (caddr existing-bb) 0.0) col-gap) ; 行内向右
-                   ins-y last-y)))
+             (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc)
+                   ins-x 0.0
+                   y-top (- (if existing-bb (cadr existing-bb) 0.0) row-gap)))) ; 行满换行
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
@@ -1045,10 +1067,12 @@
                         nil)))
 
                   ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
+                  ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
                   (setq export-objs (append front-objs back-objs)
                         unit-w (if (equal title "精雕")
                                  (+ (* 2.0 part-w) 75.0)
-                                 part-w))
+                                 part-w)
+                        ins-y (if (= grid-n 0) 0.0 (- y-top part-h)))
                   (if (or (> ins-x 0.0) (/= ins-y 0.0))
                     (foreach o export-objs
                       (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list ins-x ins-y 0.0)))))
@@ -1126,12 +1150,13 @@
                       (if (and box-obj (not (vl-catch-all-error-p box-obj)))
                         (progn
                           (vla-put-closed box-obj :vlax-true)
+                          ;; v2.4: 实体级颜色 —— 非活动文档的图层色显示不即时生效(同字体坑),
+                          ;; 实体色优先, 首幅即显绿色
+                          (vla-put-color box-obj 3)
                           (vla-put-layer box-obj "外协包络盒"))
                         (princ "\n【精雕】包络盒生成警告(工件本身不受影响)。"))))
 
-                  ;; 8) v2.3: 排版游标回写(幅数+1, Y 基线), 之后保存目标图纸并刷新
-                  (dt:sz-sysvar-set tgt-doc "USERI5" (1+ grid-n))
-                  (dt:sz-sysvar-set tgt-doc "USERR5" ins-y)
+                  ;; 8) 保存目标图纸并刷新
                   (setq save-res (vl-catch-all-apply 'vla-save (list tgt-doc)))
                   (if (vl-catch-all-error-p save-res)
                     (setq save-res (vl-catch-all-apply 'vla-saveas (list tgt-doc target-path))))
@@ -1141,8 +1166,8 @@
 
                   (princ "\n------------------------------------------------------------")
                   (princ (strcat "\n【" title "】工件已成功输出并排版至: " target-path))
-                  (princ (strcat "\n【" title "】排版位置: 第 " (itoa (1+ grid-row))
-                                 " 行第 " (itoa (1+ grid-col)) " 幅 (X=" (rtos ins-x 2 2)
+                  (princ (strcat "\n【" title "】排版位置: 第 " (itoa (1+ grid-n))
+                                 " 幅 (X=" (rtos ins-x 2 2)
                                  " Y=" (rtos ins-y 2 2) ", 列距/行距 " (rtos col-gap 2 0) "/"
                                  (rtos row-gap 2 0) "mm"
                                  (if (equal title "精雕") ", 镜像在右侧 75mm, 已加包络盒" "")
@@ -1467,5 +1492,5 @@
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.3 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.4 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)
