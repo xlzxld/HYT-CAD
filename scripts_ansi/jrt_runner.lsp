@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.17
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.18
 ;;; v9.17  : 修复 v9.16 运行报「调用(*push-error-using-command*)前无法从
 ;;;          *error* 调用(command)」(坑 #69 在本文件的残留): ①根因 = 出线口
 ;;;          交点解析误用 cadr 取 dt:cross-points 的返回对 (obj . pts) ——
@@ -2484,10 +2484,14 @@
     (princ)
   )
 
-  ;; 第 0 步: 先弹独立模板选择框(确定=采用该模板及参数默认, 取消中止),
-  ;;          再弹参数框(确定后参数已应用; 取消则中止流程)
-  (if (null (dt:jrt-template-dialog))
-    (princ "\n已取消(未选模板), 未执行加热条绘制。")
+  ;; v9.18: 会话版本守卫 —— 旧会话/半加载缺少出线口函数时明确提示并中止
+  ;; (不再让运行期抛 no function definition)
+  (if (null dt:jrt2-hook-one)
+    (progn
+      (princ "\n【错误】当前会话的 jrt_runner 为旧版本或不完整(缺少出线口函数)。")
+      (princ "\n【错误】请完全关闭 AutoCAD 所有窗口后重新打开, 再运行本命令。"))
+    (if (null (dt:jrt-template-dialog))
+      (princ "\n已取消(未选模板), 未执行加热条绘制。")
     (if (null (dt:jrt-param-dialog))
       (princ "\n已取消, 未执行加热条绘制。")
       (if (setq proc (cdr (assoc 'process (nth 3 (dt:jrt-template-row)))))
@@ -2550,12 +2554,15 @@
     )
       )
     )
-  )
+  ))
   (princ)  ; 静默退出, 不打印返回结果
 )
 ;;; 加载时在命令行输出提示
 (dt:jrt-cfg-boot)
-(princ "\n加热条自动绘制工具 v9.17 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+;; v9.18: 加载完整性自检(半加载防御 —— DTRELOAD 撞上文件中间态时后半部分缺失)
+(if (or (null dt:jrt2-hooks) (null dt:jrt2-hook-one) (null dt:jrt2-process))
+  (princ "\n【严重】jrt_runner 加载不完整(核心函数缺失) —— 请完全关闭 AutoCAD 所有窗口后重新打开, 勿仅 DTRELOAD!"))
+(princ "\n加热条自动绘制工具 v9.18 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)

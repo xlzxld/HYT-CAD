@@ -10,6 +10,9 @@ dt_cx_param : dialog {
       : edit_box { key = "cx_fillet_r_small"; label = "出线槽小圆角R:"; edit_width = 10; }
       : edit_box { key = "cx_fillet_r_large"; label = "出线槽大圆角R:"; edit_width = 10; }
     }
+    : row {
+      : edit_box { key = "cx_yxb_gap"; label = "压线板间距:"; edit_width = 10; }
+    }
   }
   : row {
     : button { key = "reset"; label = "恢复默认"; width = 10; }
