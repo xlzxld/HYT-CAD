@@ -1,5 +1,8 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.7
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.8
+;;; v10.8  : 修复压线板"函数错误: LAMBDA" —— dt:cx-yxb-place 局部计数器 n
+;;;          与 dt:cx-yxb-draw 参数 n 撞名(AutoLISP 大小写不敏感 + 动态作用
+;;;          域, 外层局部污染内层 lambda 自由变量), 分别改名 n-old / nrm。
 ;;; v10.7  : 压线板简化(用户定案): 移除碰撞判断(cands/clash/wall 三函数
 ;;;          删除), 改为按 cx_yxb_gap 沿选定侧壁无条件均匀放置; 流程拆成
 ;;;          删源线前的 dt:cx-yxb-plan(用源线判外侧方向, 只收数据)与删源
@@ -1393,10 +1396,10 @@
 
 ;; 模板实例绘制: o = 重合线起点(壁上), u = 壁方向单位向量, n = 外侧法向单位
 ;; 向量(本地 +Y→u, +X→n; 弧角度随旋转平移)。返回新建实体 vla 列表(YXB 层)
-(defun dt:cx-yxb-draw (o u n layer / xfn a1 ents e t1 t2)
+(defun dt:cx-yxb-draw (o u nrm layer / xfn a1 ents e t1 t2)
   (setq xfn '(lambda (lx ly)
-               (list (+ (car o) (* (car u) ly) (* (car n) lx))
-                     (+ (cadr o) (* (cadr u) ly) (* (cadr n) lx))
+               (list (+ (car o) (* (car u) ly) (* (car nrm) lx))
+                     (+ (cadr o) (* (cadr u) ly) (* (cadr nrm) lx))
                      0.0))
         a1 (angle '(0.0 0.0 0.0) n)
         ents nil)
@@ -1465,7 +1468,7 @@
 
 ;; 放置(v10.7, 删源线后调用): 按间距无条件均匀放置(不做碰撞判断 —— 用户定案)。
 ;; plans = ((sp u n0 L) ...), 返回放置总数。
-(defun dt:cx-yxb-place (plans gap / doc n placed sp u n0 L d p-base)
+(defun dt:cx-yxb-place (plans gap / doc n-old placed sp u n0 L d p-base)
   (setq placed 0)
   (cond
     ((<= gap 0.0)
@@ -1475,11 +1478,11 @@
     (T
      (setq doc (vla-get-activedocument (vlax-get-acad-object)))
      (dt:ensure-layer (vla-get-layers doc) "YXB" 4 "青色")
-     (setq n 0)
+     (setq n-old 0)
      (foreach o (dt:layer-vlas "YXB")
        (vl-catch-all-apply 'vla-delete (list o))
-       (setq n (1+ n)))
-     (if (> n 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n) " 个。")))
+       (setq n-old (1+ n-old)))
+     (if (> n-old 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n-old) " 个。")))
      (foreach pn plans
        (setq sp (car pn) u (cadr pn) n0 (caddr pn) L (cadddr pn)
              d gap)
@@ -1707,7 +1710,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v10.7 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v10.8 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

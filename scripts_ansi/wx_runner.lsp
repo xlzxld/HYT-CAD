@@ -20,7 +20,13 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.5
+;;; 版本: v2.6
+;;; v2.6  : 修复追加报 numberp nil + 包络盒内部边距(用户实测反馈):
+;;;         ①grid-col 漏初始化 —— 首幅(无既有文字)不进计数循环所以
+;;;           成功, 追加时 (1+ nil) 抛 numberp: nil, 补 setq grid-col 0;
+;;;         ②盒与内容之间恢复 20mm 内边距(v2.5 误改为 0, 用户只要求
+;;;           盒与盒之间间距统一), 行内锚定/换行补偿 20mm 保持盒间净距
+;;;           = box_gap。
 ;;; v2.5  : 修复行内漂移 + 包络盒间距统一 + 剪贴板分隔符(用户实测反馈):
 ;;;         ①行内追加 x 参照从"图纸整体 maxx"改为"当前行文字 bbox 的
 ;;;           maxx + box_gap" —— 整体 maxx 会命中上一行末尾图形(行向下
@@ -966,14 +972,15 @@
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
               (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 210)))
 
-          ;; 3) v2.5 网格排版(纯几何推导): 单位标记 = "外协文字"层 MText(每幅
+          ;; 3) v2.6 网格排版(纯几何推导): 单位标记 = "外协文字"层 MText(每幅
           ;;    恰好 1 个, 同时缓存各自 bbox)。当前行 = 插入点 Y 最小的文字组;
-          ;;    行内 <4 幅 → 行内追加(x = 当前行文字 bbox 的 maxx + box_gap);
-          ;;    已满 4 幅 → 向下换行(x = 0, y_top = 图纸 miny - box_gap)。
-          ;;    盒边距 0: 包络盒 = 内容精确 bbox → 盒间距 = box_gap 恒定
-          ;;    (上下左右一致, ini [排版] box_gap 可调)。
+          ;;    行内 <4 幅 → 行内追加(x = 当前行盒右缘 + box_gap; 盒右缘 =
+          ;;    文字 maxx + 20 盒边距); 已满 4 幅 → 向下换行(y_top =
+          ;;    图纸 miny - 20 - box_gap)。盒与内容间保留 20mm 内边距,
+          ;;    盒与盒之间净距 = box_gap(ini [排版] 可调)。
           (setq txt-list (dt:sz-doc-texts tgt-doc "外协文字")
                 grid-n   (length txt-list)
+                grid-col 0
                 txt-infos nil
                 txt-min-y 1e99
                 row-maxx -1e99)
@@ -993,12 +1000,14 @@
             ((= grid-n 0)
              (setq ins-x 0.0 y-top 0.0))                      ; 首幅(基线 0, 4e 回填)
             ((< grid-col 4)
-             (setq ins-x (if (> row-maxx -1e98) (+ row-maxx box-gap) box-gap)
+             (setq ins-x (if (> row-maxx -1e98)
+                           (+ row-maxx 20.0 box-gap)          ; 盒右缘 + 盒间距
+                           box-gap)
                    y-top (- txt-min-y 50.0)))                 ; 行内追加: 与行顶对齐
             (T
              (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc)
                    ins-x 0.0
-                   y-top (- (if existing-bb (cadr existing-bb) 0.0) box-gap)))) ; 行满换行
+                   y-top (- (if existing-bb (cadr existing-bb) 0.0) 20.0 box-gap)))) ; 行满换行
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
@@ -1145,12 +1154,12 @@
                       (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 3)
                       (setq txt-bb (if (and txt-obj (not (vl-catch-all-error-p txt-obj)))
                                      (dt:rect-bbox (list txt-obj)))
-                            bx1 ins-x
-                            by1 ins-y
-                            bx2 (+ ins-x unit-w)
+                            bx1 (- ins-x 20.0)
+                            by1 (- ins-y 20.0)
+                            bx2 (+ ins-x unit-w 20.0)
                             by2 (if txt-bb
-                                  (cadddr txt-bb)
-                                  (+ ins-y part-h 110.0)))
+                                  (+ (cadddr txt-bb) 20.0)
+                                  (+ ins-y part-h 130.0)))
                       (setq box-obj (vl-catch-all-apply
                                       'vla-addlightweightpolyline
                                       (list ms-tgt
@@ -1503,5 +1512,5 @@
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.5 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.6 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)
