@@ -1,6 +1,9 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.5
-
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.6
+;;; v10.6  : 修复压线板碰撞检测卡死/CPU 飙高: 候选实体 bbox 一次缓存,
+;;;          每次滑动尝试先用实例包络盒(约 20x17mm)做 bbox 级预过滤,
+;;;          只对命中候选做 COM 求交 —— 每墙求交从万级降到百级以内;
+;;;          cx_yxb_gap <= 0 时跳过压线板(防异常配置死循环)。
 ;;; v10.5  : 新增出线槽压线板(用户需求, 模板取自 tools\1.dxf 的 YXB 图层):
 ;;;          生成出线槽时在选定侧壁线上每隔 cx_yxb_gap(默认125, 进参数框)
 ;;;          放置一幅压线板 —— 重合线与壁线完全重合(斜壁同步旋转贴合),
@@ -1410,16 +1413,20 @@
   (reverse ents))
 
 ;; 实例非重合曲线是否与候选实体相交(任一相交即碰撞):
-;; curves = 实例曲线列表, cands = 候选 vla 列表, skip-first = 跳过首条(重合线贴壁属正常)
-(defun dt:cx-yxb-clash (curves cands skip-first / i hit ip vals c cd)
+;; curves = 实例曲线列表, cands = (vla bbox) 对列表(bbox 已按墙缓存一次),
+;; ibox = 实例整体包络盒 —— v10.6 先做 bbox 级预过滤(实例仅约 20×17mm,
+;; 命中候选通常 0~5 个), 只对存活者做 COM 求交(修复万级求交卡死);
+;; skip-first = 跳过首条(重合线贴壁属正常)
+(defun dt:cx-yxb-clash (curves cands ibox skip-first / i hit ip vals c cd)
   (setq i 0 hit nil)
   (foreach c curves
     (setq i (1+ i))
     (if (and (not hit) (not (and skip-first (= i 1))))
       (foreach cd cands
-        (if (null hit)
+        (if (and (null hit)
+                 (dt:bbox-overlap-p ibox (cadr cd)))
           (progn
-            (setq ip (vl-catch-all-apply 'vla-IntersectWith (list c cd :vlax-false)))
+            (setq ip (vl-catch-all-apply 'vla-IntersectWith (list c (car cd) :vlax-false)))
             (if (and (not (vl-catch-all-error-p ip)) ip)
               (progn
                 (setq vals (vlax-safearray->list (vlax-variant-value ip)))
@@ -1478,9 +1485,10 @@
             (if (null found) (setq e (entnext e)))))))
   found)))
 
-;; 壁走廊候选实体(vla 列表): wall bbox 外扩 gap+40, 排除全部源线
+;; 壁走廊候选实体((vla bbox) 对列表): wall bbox 外扩 60mm, 排除全部源线
 ;; (源线随后即删, 不算障碍; 壁线本身保留为候选 —— 主体碰壁也算碰撞)
-(defun dt:cx-yxb-cands (wall-en src-enames gap / wall-o bb e o dd res)
+;; v10.6: 候选 bbox 一次缓存, 供碰撞检测的实例级预过滤(性能)
+(defun dt:cx-yxb-cands (wall-en src-enames / wall-o bb e o dd res)
   (setq wall-o (vlax-ename->vla-object wall-en)
         bb (dt:rect-bbox (list wall-o))
         res nil)
@@ -1493,11 +1501,11 @@
           (progn
             (setq dd (dt:rect-bbox (list o)))
             (if (and dd
-                     (<= (car dd) (+ (caddr bb) gap 40.0))
-                     (>= (caddr dd) (- (car bb) gap 40.0))
-                     (<= (cadr dd) (+ (cadddr bb) gap 40.0))
-                     (>= (cadddr dd) (- (cadr bb) gap 40.0)))
-              (setq res (cons o res)))))
+                     (<= (car dd) (+ (caddr bb) 60.0))
+                     (>= (caddr dd) (- (car bb) 60.0))
+                     (<= (cadr dd) (+ (cadddr bb) 60.0))
+                     (>= (cadddr dd) (- (cadr bb) 60.0)))
+              (setq res (cons (list o dd) res)))))
         (setq e (entnext e)))))
   res)
 
@@ -1505,7 +1513,7 @@
 ;; 碰撞沿壁滑动让位(步进 10, 上限 50)。返回成功放置数。
 (defun dt:cx-yxb-wall (wall-en src-line ms gap cands /
                           wall-o sp ep du L ss2 ee2 ds dl n0 pA pB
-                          placed d p-base tries off d2 ents own clash tmp)
+                          placed d p-base tries off d2 ents own ibox clash tmp)
   (setq wall-o (vlax-ename->vla-object wall-en))
   (if (/= (vla-get-objectname wall-o) "AcDbLine")
     (progn (princ "
@@ -1550,7 +1558,8 @@
                                      (+ (nth 1 sp) (* (nth 1 du) d2)) 0.0)
                         ents (dt:cx-yxb-draw p-base du n0 "YXB")
                         own  (mapcar 'vlax-vla-object->ename ents)
-                        clash (dt:cx-yxb-clash ents cands T))
+                        ibox (dt:rect-bbox ents)
+                        clash (dt:cx-yxb-clash ents cands ibox T))
                   (if clash
                     (foreach o ents (vl-catch-all-apply 'vla-delete (list o)))
                     (setq placed (1+ placed))))))
@@ -1566,26 +1575,29 @@
   (setq doc (vla-get-activedocument (vlax-get-acad-object))
         layers (vla-get-layers doc)
         placed 0)
-  (dt:ensure-layer layers "YXB" 4 "青色")
-  ;; 清空旧实例(脚本独占 YXB 层)
-  (setq n 0)
-  (foreach o (dt:layer-vlas "YXB")
-    (vl-catch-all-apply 'vla-delete (list o))
-    (setq n (1+ n)))
-  (if (> n 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n) " 个。")))
-  (foreach src center-lines
-    (setq wall-en (dt:cx-yxb-find-wall src slot-layer src-enames side slot-dist))
-    (if wall-en
-      (progn
-        (setq cands (dt:cx-yxb-cands wall-en src-enames *dt-cx-yxb-gap*)
-              cands (mapcar 'vlax-ename->vla-object cands))
-        (setq placed (+ placed
-                        (dt:cx-yxb-wall wall-en src (dt:ms) *dt-cx-yxb-gap* cands))))
-      (princ "\n【压线板】未找到该侧直壁(弧形壁或参数不符), 跳过此出线槽。")))
-  (princ (strcat "\n【压线板】完成: 共放置 " (itoa placed) " 幅(间距 "
-                 (rtos *dt-cx-yxb-gap* 2 1) "mm, 贴"
-                 (if (= (strcase side) "LEFT") "左" "右") "壁)。"))
-  placed)
+  (cond
+    ((<= *dt-cx-yxb-gap* 0.0)
+     (princ "\n【压线板】间距参数 ≤ 0, 已跳过压线板布置(请检查参数设置)。") 0)
+    (T
+     (dt:ensure-layer layers "YXB" 4 "青色")
+     ;; 清空旧实例(脚本独占 YXB 层)
+     (setq n 0)
+     (foreach o (dt:layer-vlas "YXB")
+       (vl-catch-all-apply 'vla-delete (list o))
+       (setq n (1+ n)))
+     (if (> n 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n) " 个。")))
+     (foreach src center-lines
+       (setq wall-en (dt:cx-yxb-find-wall src slot-layer src-enames side slot-dist))
+       (if wall-en
+         (progn
+           (setq cands (dt:cx-yxb-cands wall-en src-enames))
+           (setq placed (+ placed
+                           (dt:cx-yxb-wall wall-en src (dt:ms) *dt-cx-yxb-gap* cands))))
+         (princ "\n【压线板】未找到该侧直壁(弧形壁或参数不符), 跳过此出线槽。")))
+     (princ (strcat "\n【压线板】完成: 共放置 " (itoa placed) " 幅(间距 "
+                    (rtos *dt-cx-yxb-gap* 2 1) "mm, 贴"
+                    (if (= (strcase side) "LEFT") "左" "右") "壁)。"))
+     placed)))
 
 ;; ============================================================================
 ;; 参数对话框 —— 与主脚本 flb_runner 的对话框相互独立:
@@ -1749,7 +1761,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v10.5 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v10.6 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")
