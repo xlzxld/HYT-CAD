@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.0
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.1
 ;;; v11.0  : 压线板卡死防御(用户实测 CX 卡死/CPU 满): 间距 <10 视为误填
 ;;;          按 125 处理; 每壁上限 100 幅(超限截断并警告); 规划/放置阶段
 ;;;          打印进度 —— 卡死时可从输出定位阶段。
@@ -1491,7 +1491,7 @@
        (setq n-old (1+ n-old)))
      (if (> n-old 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n-old) " 个。")))
      (princ (strcat "\n【压线板】开始放置: \n" 
-                    + "壁 " (itoa (length plans)) " 条, 间距 " (rtos gap 2 1) "mm..."))
+                    "壁 " (itoa (length plans)) " 条, 间距 " (rtos gap 2 1) "mm..."))
      (foreach pn plans
        (setq sp (car pn) u (cadr pn) n0 (caddr pn) L (cadddr pn)
              d gap cnt 0)
@@ -1720,7 +1720,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v11.0 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v11.1 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

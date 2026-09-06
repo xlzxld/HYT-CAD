@@ -1,5 +1,9 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.22
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.23
+;;; v9.23  : 修复 "no function definition: PW" —— v9.22 误用 let 特殊形式
+;;;          (AutoLISP 无 let), 解释器把绑定变量 pw 当函数调用。改为普通
+;;;          setq + 局部表 pw。
+;;; v9.22  : 修复通用二出线口通道线方向随机(用户实测截图): 通道线保留段
 ;;; v9.21  : 根治"no function definition: DT:JRT2-HOOK-ONE"(坑 #73):
 ;;;          v9.17 引入的 dt:jrt-undo-mark 函数体少 1 个右括号, 其 defun
 ;;;          吞掉了后续多个函数的 defun(含 ch-exist 区段与 hook-one —— 两处
@@ -1780,7 +1784,7 @@
 ;; 单条定位短线 → 在其外壁上开 S 形出线口。返回更新后的 srcs(失败原样)。
 ;; 流程: 通道线 = stub 朝两边偏 halfw → 找两线都穿过的外壁 → 角点/切向 →
 ;;       过渡弧×2 → 外壁在两切点间开口(保留段重建, 原线删) → 通道线裁到切点。
-(defun dt:jrt2-hook-one (stub srcs halfw r / typ sa ea d ul ch1 ch2 wall pu pl e-out
+(defun dt:jrt2-hook-one (stub srcs halfw r / typ sa ea d ul ch1 ch2 wall pu pl pw e-out
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
                             p1 p2 nch1 nch2 out)
   (setq typ (vla-get-objectname stub))
@@ -1872,9 +1876,11 @@
                           (setq p2 (dt:rebuild-seg wall pb pe "JRT")))
                         (vla-delete wall)
                         ;; v9.22: 通道线只保留靠定位线外端一侧(裁掉侵入分流板内部的段)
-                        (setq e-out (let ((pw (dt:jrt2-near-pt
-                                       (dt:jrt2-line-x-curve stub wall) sa)))
-                                (if (and pw (< (distance sa pw) (distance ea pw))) ea sa))
+                        (setq pw (dt:jrt2-near-pt
+                                   (dt:jrt2-line-x-curve stub wall) sa)
+                              e-out (if (and pw (< (distance sa pw) (distance ea pw)))
+                                      ea
+                                      sa)
                               nch1 (dt:jrt2-trim-line ch1 fp1 e-out)
                               nch2 (dt:jrt2-trim-line ch2 fp2 e-out))
                         (setq out (vl-remove wall srcs))
@@ -2579,7 +2585,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.22 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.23 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
