@@ -1,5 +1,10 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.6
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.7
+;;; v10.7  : 压线板简化(用户定案): 移除碰撞判断(cands/clash/wall 三函数
+;;;          删除), 改为按 cx_yxb_gap 沿选定侧壁无条件均匀放置; 流程拆成
+;;;          删源线前的 dt:cx-yxb-plan(用源线判外侧方向, 只收数据)与删源
+;;;          线后的 dt:cx-yxb-place(纯放置, 异常不再影响源线清理)——
+;;;          同时修复 v10.6 压线板阶段卡死问题。
 ;;; v10.6  : 修复压线板碰撞检测卡死/CPU 飙高: 候选实体 bbox 一次缓存,
 ;;;          每次滑动尝试先用实例包络盒(约 20x17mm)做 bbox 级预过滤,
 ;;;          只对命中候选做 COM 求交 —— 每墙求交从万级降到百级以内;
@@ -1305,7 +1310,7 @@
 ;;   * v9.6: 通道敞口(源线悬空端)用封闭线封上(放本层); 流程末尾**删除
 ;;     全部源线** —— 重跑 SLOT 需重新绘制源线, 旧通道壁仍需先手动清理。
 (defun dt:cx-process (src-layer slot-layer slot-dist yxb-side
-                        / ss src-enames center-lines res ext-rec n-del r en)
+                        / ss src-enames center-lines res ext-rec n-del r en yxb-plans)
   (if (null slot-dist) (setq slot-dist *dt-cx-dist*))
   (if (null yxb-side) (setq yxb-side "Left"))
   (setq ss (ssget "X" (list (cons 8 src-layer))))
@@ -1343,7 +1348,7 @@
           ;;      一幅压线板(YXB 图层青色 4) —— 重合线贴壁, 主体朝通道外侧,
           ;;      其余曲线碰图上实体时沿壁滑动让位, 无位可让则跳过该处。
           ;;      必须在删除源线之前执行(用源线判定通道外侧方向)。
-          (dt:cx-yxb slot-layer center-lines src-enames yxb-side slot-dist)
+          (setq yxb-plans (dt:cx-yxb-plan center-lines slot-layer src-enames yxb-side slot-dist))
           ;; 6) 删除源线(v9.6, 用户要求): 偏移用的源线全部删除, 图面
           ;;    只留通道壁/圆弧/封闭线。注意: 重跑 SLOT 需重新绘制源线;
           ;;    旧通道壁仍需先手动清理(既有约定)。
@@ -1359,7 +1364,9 @@
               (setq n-del (1+ n-del))))
           (dt:cx-undo-end)
           (princ (strcat "\n【出线槽】已删除源线 " (itoa n-del)
-                         " 条(重跑 SLOT 需重新绘制源线)。")))
+                         " 条(重跑 SLOT 需重新绘制源线)。"))
+          ;; 6.5) v10.7 压线板放置(源线已删, 异常不再影响清理)
+          (dt:cx-yxb-place yxb-plans *dt-cx-yxb-gap*))
         (princ "\n【出线槽】偏移失败(无通道壁生成)。")))))
 
 ;; ============================================================================
@@ -1412,27 +1419,79 @@
   (foreach ent ents (vla-put-layer ent layer))
   (reverse ents))
 
-;; 实例非重合曲线是否与候选实体相交(任一相交即碰撞):
-;; curves = 实例曲线列表, cands = (vla bbox) 对列表(bbox 已按墙缓存一次),
-;; ibox = 实例整体包络盒 —— v10.6 先做 bbox 级预过滤(实例仅约 20×17mm,
-;; 命中候选通常 0~5 个), 只对存活者做 COM 求交(修复万级求交卡死);
-;; skip-first = 跳过首条(重合线贴壁属正常)
-(defun dt:cx-yxb-clash (curves cands ibox skip-first / i hit ip vals c cd)
-  (setq i 0 hit nil)
-  (foreach c curves
-    (setq i (1+ i))
-    (if (and (not hit) (not (and skip-first (= i 1))))
-      (foreach cd cands
-        (if (and (null hit)
-                 (dt:bbox-overlap-p ibox (cadr cd)))
-          (progn
-            (setq ip (vl-catch-all-apply 'vla-IntersectWith (list c (car cd) :vlax-false)))
-            (if (and (not (vl-catch-all-error-p ip)) ip)
-              (progn
-                (setq vals (vlax-safearray->list (vlax-variant-value ip)))
-                (if (> (length vals) 0) (setq hit T))))))))
-  hit))
+;; 规划(v10.7, 删源线前调用): 每条源线选定侧的直壁 -> (sp u n0 L) 数据。
 
+;; sp = 壁起点(与源线同向化后), u = 壁方向单位向量, n0 = 外侧法向, L = 壁长。
+;; 只收集数据不动图元; 放置在删源线后由 dt:cx-yxb-place 执行。
+(defun dt:cx-yxb-plan (center-lines slot-layer src-enames side slot-dist /
+                       plans src wall-en wall-o sp ep u n0 pA pB ss2 ee2 ds dl L tmp)
+  (foreach src center-lines
+    (setq wall-en (dt:cx-yxb-find-wall src slot-layer src-enames side slot-dist))
+    (if wall-en
+      (progn
+        (setq wall-o (vlax-ename->vla-object wall-en))
+        (if (= (vla-get-objectname wall-o) "AcDbLine")
+          (progn
+            (setq sp (vlax-curve-getstartpoint wall-o)
+                  ep (vlax-curve-getendpoint wall-o)
+                  sp (list (nth 0 sp) (nth 1 sp) 0.0)
+                  ep (list (nth 0 ep) (nth 1 ep) 0.0)
+                  L  (distance sp ep)
+                  ss2 (vlax-curve-getstartpoint src)
+                  ee2 (vlax-curve-getendpoint src)
+                  ds  (list (- (nth 0 ee2) (nth 0 ss2)) (- (nth 1 ee2) (nth 1 ss2)) 0.0)
+                  dl  (sqrt (+ (* (nth 0 ds) (nth 0 ds)) (* (nth 1 ds) (nth 1 ds)))))
+            (if (> dl 1e-8)
+              (progn
+                (setq ds (list (/ (nth 0 ds) dl) (/ (nth 1 ds) dl) 0.0))
+                (if (< (+ (* (nth 0 ds) (- (nth 0 ep) (nth 0 sp)))
+                          (* (nth 1 ds) (- (nth 1 ep) (nth 1 sp)))) 0.0)
+                  (setq tmp sp sp ep ep tmp))
+                (setq u  (list (/ (- (nth 0 ep) (nth 0 sp)) L)
+                               (/ (- (nth 1 ep) (nth 1 sp)) L) 0.0)
+                      n0 (list (- (nth 1 u)) (nth 0 u) 0.0)
+                      pA (list (+ (nth 0 sp) (* (nth 0 u) (* 0.5 L)) (* (nth 0 n0) 1.0))
+                               (+ (nth 1 sp) (* (nth 1 u) (* 0.5 L)) (* (nth 1 n0) 1.0)) 0.0)
+                      pB (list (+ (nth 0 sp) (* (nth 0 u) (* 0.5 L)) (- (nth 0 n0)))
+                               (+ (nth 1 sp) (* (nth 1 u) (* 0.5 L)) (- (nth 1 n0))) 0.0))
+                (if (< (dt:cx-yxb-pt-line-dist pA ss2 ds)
+                       (dt:cx-yxb-pt-line-dist pB ss2 ds))
+                  (setq n0 (list (- (nth 0 n0)) (- (nth 1 n0)) 0.0)))
+                (setq plans (cons (list sp u n0 L) plans)))
+              (princ "\n【压线板】源线零长, 跳过。")))
+          (princ "\n【压线板】该侧壁非直线(弧形通道暂不支持), 跳过。")))
+      (princ "\n【压线板】未找到该侧直壁(弧形壁或参数不符), 跳过此出线槽。")))
+  (reverse plans))
+
+;; 放置(v10.7, 删源线后调用): 按间距无条件均匀放置(不做碰撞判断 —— 用户定案)。
+;; plans = ((sp u n0 L) ...), 返回放置总数。
+(defun dt:cx-yxb-place (plans gap / doc n placed sp u n0 L d p-base)
+  (setq placed 0)
+  (cond
+    ((<= gap 0.0)
+     (princ "\n【压线板】间距参数 <= 0, 已跳过压线板布置(请检查参数设置)。"))
+    ((null plans)
+     (princ "\n【压线板】无可放置的壁(规划为空)。"))
+    (T
+     (setq doc (vla-get-activedocument (vlax-get-acad-object)))
+     (dt:ensure-layer (vla-get-layers doc) "YXB" 4 "青色")
+     (setq n 0)
+     (foreach o (dt:layer-vlas "YXB")
+       (vl-catch-all-apply 'vla-delete (list o))
+       (setq n (1+ n)))
+     (if (> n 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n) " 个。")))
+     (foreach pn plans
+       (setq sp (car pn) u (cadr pn) n0 (caddr pn) L (cadddr pn)
+             d gap)
+       (while (<= (+ d 16.6) L)
+         (setq p-base (list (+ (nth 0 sp) (* (nth 0 u) d))
+                            (+ (nth 1 sp) (* (nth 1 u) d)) 0.0))
+         (dt:cx-yxb-draw p-base u n0 "YXB")
+         (setq placed (1+ placed)
+               d (+ d gap))))
+     (princ (strcat "\n【压线板】完成: 共放置 " (itoa placed) " 幅(间距 "
+                    (rtos gap 2 1) "mm, 无碰撞判断)。"))))
+  placed)
 ;; 点到无限直线的距离(lp = 线上一点, ld = 单位方向)
 (defun dt:cx-yxb-pt-line-dist (pt lp ld / vx vy t-)
   (setq vx (- (nth 0 pt) (nth 0 lp))
@@ -1485,119 +1544,6 @@
             (if (null found) (setq e (entnext e)))))))
   found)))
 
-;; 壁走廊候选实体((vla bbox) 对列表): wall bbox 外扩 60mm, 排除全部源线
-;; (源线随后即删, 不算障碍; 壁线本身保留为候选 —— 主体碰壁也算碰撞)
-;; v10.6: 候选 bbox 一次缓存, 供碰撞检测的实例级预过滤(性能)
-(defun dt:cx-yxb-cands (wall-en src-enames / wall-o bb e o dd res)
-  (setq wall-o (vlax-ename->vla-object wall-en)
-        bb (dt:rect-bbox (list wall-o))
-        res nil)
-  (if bb
-    (progn
-      (setq e (entnext))
-      (while e
-        (setq o (vl-catch-all-apply 'vlax-ename->vla-object (list e)))
-        (if (and o (not (vl-catch-all-error-p o)) (not (member e src-enames)))
-          (progn
-            (setq dd (dt:rect-bbox (list o)))
-            (if (and dd
-                     (<= (car dd) (+ (caddr bb) 60.0))
-                     (>= (caddr dd) (- (car bb) 60.0))
-                     (<= (cadr dd) (+ (cadddr bb) 60.0))
-                     (>= (cadddr dd) (- (cadr bb) 60.0)))
-              (setq res (cons (list o dd) res)))))
-        (setq e (entnext e)))))
-  res)
-
-;; 在一条壁线上布置压线板: u 取源线方向, n 朝通道外侧; 每 gap 一幅,
-;; 碰撞沿壁滑动让位(步进 10, 上限 50)。返回成功放置数。
-(defun dt:cx-yxb-wall (wall-en src-line ms gap cands /
-                          wall-o sp ep du L ss2 ee2 ds dl n0 pA pB
-                          placed d p-base tries off d2 ents own ibox clash tmp)
-  (setq wall-o (vlax-ename->vla-object wall-en))
-  (if (/= (vla-get-objectname wall-o) "AcDbLine")
-    (progn (princ "
-【压线板】该侧壁非直线(弧形通道暂不支持), 跳过。") 0)
-    (progn
-      (setq sp (vlax-curve-getstartpoint wall-o)
-            ep (vlax-curve-getendpoint wall-o)
-            sp (list (nth 0 sp) (nth 1 sp) 0.0)
-            ep (list (nth 0 ep) (nth 1 ep) 0.0)
-            L  (distance sp ep)
-            du (list (/ (- (nth 0 ep) (nth 0 sp)) L)
-                     (/ (- (nth 1 ep) (nth 1 sp)) L) 0.0)
-            ss2 (vlax-curve-getstartpoint src-line)
-            ee2 (vlax-curve-getendpoint src-line)
-            ds  (list (- (nth 0 ee2) (nth 0 ss2)) (- (nth 1 ee2) (nth 1 ss2)) 0.0)
-            dl  (sqrt (+ (* (nth 0 ds) (nth 0 ds)) (* (nth 1 ds) (nth 1 ds)))))
-      (if (< dl 1e-8)
-        0
-        (progn
-          (setq ds (list (/ (nth 0 ds) dl) (/ (nth 1 ds) dl) 0.0))
-          (if (< (+ (* (nth 0 ds) (nth 0 du)) (* (nth 1 ds) (nth 1 du))) 0.0)
-            (setq tmp sp sp ep ep tmp))
-          (setq n0 (list (- (nth 1 du)) (nth 0 du) 0.0)
-                pA (list (+ (nth 0 sp) (* (nth 0 du) (* 0.5 L)) (* (nth 0 n0) 1.0))
-                         (+ (nth 1 sp) (* (nth 1 du) (* 0.5 L)) (* (nth 1 n0) 1.0)) 0.0)
-                pB (list (+ (nth 0 sp) (* (nth 0 du) (* 0.5 L)) (- (nth 0 n0)))
-                         (+ (nth 1 sp) (* (nth 1 du) (* 0.5 L)) (- (nth 1 n0))) 0.0))
-          (if (< (dt:cx-yxb-pt-line-dist pA ss2 ds)
-                 (dt:cx-yxb-pt-line-dist pB ss2 ds))
-            (setq n0 (list (- (nth 0 n0)) (- (nth 1 n0)) 0.0)))
-          (setq placed 0 d gap)
-          (while (<= (+ d 16.6) L)
-            (setq tries (list 0.0 10.0 -10.0 20.0 -20.0 30.0 -30.0 40.0 -40.0 50.0 -50.0)
-                  clash T)
-            (while (and clash tries)
-              (setq off  (car tries)
-                    tries (cdr tries)
-                    d2  (+ d off))
-              (if (and (> d2 1e-6) (<= (+ d2 16.6) L))
-                (progn
-                  (setq p-base (list (+ (nth 0 sp) (* (nth 0 du) d2))
-                                     (+ (nth 1 sp) (* (nth 1 du) d2)) 0.0)
-                        ents (dt:cx-yxb-draw p-base du n0 "YXB")
-                        own  (mapcar 'vlax-vla-object->ename ents)
-                        ibox (dt:rect-bbox ents)
-                        clash (dt:cx-yxb-clash ents cands ibox T))
-                  (if clash
-                    (foreach o ents (vl-catch-all-apply 'vla-delete (list o)))
-                    (setq placed (1+ placed))))))
-            (if clash
-              (princ (strcat "
-【压线板】位置 " (rtos d 2 0) " 处碰撞且无位可让, 已跳过。")))
-            (setq d (+ d gap)))
-          placed)))))
-;; 出线槽压线板总控(v10.5): 每条源线选定侧壁线放压线板。
-;; 必须在源线删除前调用(用源线判定外侧方向)。返回成功放置总数。
-(defun dt:cx-yxb (slot-layer center-lines src-enames side slot-dist
-                 / doc layers n placed src wall-en cands)
-  (setq doc (vla-get-activedocument (vlax-get-acad-object))
-        layers (vla-get-layers doc)
-        placed 0)
-  (cond
-    ((<= *dt-cx-yxb-gap* 0.0)
-     (princ "\n【压线板】间距参数 ≤ 0, 已跳过压线板布置(请检查参数设置)。") 0)
-    (T
-     (dt:ensure-layer layers "YXB" 4 "青色")
-     ;; 清空旧实例(脚本独占 YXB 层)
-     (setq n 0)
-     (foreach o (dt:layer-vlas "YXB")
-       (vl-catch-all-apply 'vla-delete (list o))
-       (setq n (1+ n)))
-     (if (> n 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n) " 个。")))
-     (foreach src center-lines
-       (setq wall-en (dt:cx-yxb-find-wall src slot-layer src-enames side slot-dist))
-       (if wall-en
-         (progn
-           (setq cands (dt:cx-yxb-cands wall-en src-enames))
-           (setq placed (+ placed
-                           (dt:cx-yxb-wall wall-en src (dt:ms) *dt-cx-yxb-gap* cands))))
-         (princ "\n【压线板】未找到该侧直壁(弧形壁或参数不符), 跳过此出线槽。")))
-     (princ (strcat "\n【压线板】完成: 共放置 " (itoa placed) " 幅(间距 "
-                    (rtos *dt-cx-yxb-gap* 2 1) "mm, 贴"
-                    (if (= (strcase side) "LEFT") "左" "右") "壁)。"))
-     placed)))
 
 ;; ============================================================================
 ;; 参数对话框 —— 与主脚本 flb_runner 的对话框相互独立:
@@ -1761,7 +1707,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v10.6 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v10.7 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

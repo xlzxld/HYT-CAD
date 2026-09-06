@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.18
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.19
 ;;; v9.17  : 修复 v9.16 运行报「调用(*push-error-using-command*)前无法从
 ;;;          *error* 调用(command)」(坑 #69 在本文件的残留): ①根因 = 出线口
 ;;;          交点解析误用 cadr 取 dt:cross-points 的返回对 (obj . pts) ——
@@ -2559,10 +2559,20 @@
 )
 ;;; 加载时在命令行输出提示
 (dt:jrt-cfg-boot)
-;; v9.18: 加载完整性自检(半加载防御 —— DTRELOAD 撞上文件中间态时后半部分缺失)
-(if (or (null dt:jrt2-hooks) (null dt:jrt2-hook-one) (null dt:jrt2-process))
-  (princ "\n【严重】jrt_runner 加载不完整(核心函数缺失) —— 请完全关闭 AutoCAD 所有窗口后重新打开, 勿仅 DTRELOAD!"))
-(princ "\n加热条自动绘制工具 v9.18 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+;; v9.19: 加载完整性自检(atoms-family 检测函数定义, 打印缺失名单供定位根因)
+;; 同时校验"只存在于文件后半部分"的函数 —— 半加载的特征正是后半缺失
+(setq *jrt-load-check* nil)
+(foreach f '(dt:jrt2-hooks dt:jrt2-hook-one dt:jrt2-process dt:jrt2-neck
+             dt:jrt2-close dt:jrt-param-dialog dt:jrt-cfg-boot)
+  (if (not (member f (atoms-family 1)))
+    (setq *jrt-load-check* (cons (vl-symbol-name f) *jrt-load-check*))))
+(if *jrt-load-check*
+  (progn
+    (princ "\n【严重】jrt_runner 加载不完整, 缺失函数:")
+    (foreach nm *jrt-load-check*
+      (princ (strcat " " nm)))
+    (princ "\n【严重】请完全关闭 AutoCAD 所有窗口后重新打开, 勿仅 DTRELOAD!")))
+(princ "\n加热条自动绘制工具 v9.19 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
