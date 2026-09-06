@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.21
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.22
 ;;; v9.21  : 根治"no function definition: DT:JRT2-HOOK-ONE"(坑 #73):
 ;;;          v9.17 引入的 dt:jrt-undo-mark 函数体少 1 个右括号, 其 defun
 ;;;          吞掉了后续多个函数的 defun(含 ch-exist 区段与 hook-one —— 两处
@@ -1760,15 +1760,17 @@
       (vla-put-layer arc layer)
       (list arc tp fp))))
 
-;; 把通道线裁到过渡弧切点: 保留 keepfrom → 远端(距 innerpt 较远的原端点),
-;; 删原线返回新线(放 JRT 层)
-(defun dt:jrt2-trim-line (line keepfrom innerpt / s e newobj)
+;; 把通道线裁到过渡弧切点(v9.22): 保留 keepfrom → 靠外端(out-pt = 定位线
+;; 离外壁远的端点)一侧的段, 删原线返回新线(放 JRT 层)。不依赖画线方向 ——
+;; 旧版保留"距角点远的端点", 定位线反画时把板内段留下(朝内偏移根因)。
+(defun dt:jrt2-trim-line (line keepfrom out-pt / s e newobj)
   (setq s (vlax-curve-getstartpoint line)
         e (vlax-curve-getendpoint line)
         s (list (nth 0 s) (nth 1 s) 0.0)
         e (list (nth 0 e) (nth 1 e) 0.0)
-        keepfrom (list (nth 0 keepfrom) (nth 1 keepfrom) 0.0))
-  (if (> (distance s innerpt) (distance e innerpt))
+        keepfrom (list (nth 0 keepfrom) (nth 1 keepfrom) 0.0)
+        out-pt (list (nth 0 out-pt) (nth 1 out-pt) 0.0))
+  (if (> (distance s out-pt) (distance e out-pt))
     (setq e s))
   (vla-delete line)
   (setq newobj (vla-addline (dt:ms) (vlax-3d-point keepfrom) (vlax-3d-point e)))
@@ -1778,7 +1780,7 @@
 ;; 单条定位短线 → 在其外壁上开 S 形出线口。返回更新后的 srcs(失败原样)。
 ;; 流程: 通道线 = stub 朝两边偏 halfw → 找两线都穿过的外壁 → 角点/切向 →
 ;;       过渡弧×2 → 外壁在两切点间开口(保留段重建, 原线删) → 通道线裁到切点。
-(defun dt:jrt2-hook-one (stub srcs halfw r / typ sa ea d ul ch1 ch2 wall pu pl
+(defun dt:jrt2-hook-one (stub srcs halfw r / typ sa ea d ul ch1 ch2 wall pu pl e-out
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
                             p1 p2 nch1 nch2 out)
   (setq typ (vla-get-objectname stub))
@@ -1869,8 +1871,12 @@
                         (if (> (- pe pb) 1e-6)
                           (setq p2 (dt:rebuild-seg wall pb pe "JRT")))
                         (vla-delete wall)
-                        (setq nch1 (dt:jrt2-trim-line ch1 fp1 pu)
-                              nch2 (dt:jrt2-trim-line ch2 fp2 pl))
+                        ;; v9.22: 通道线只保留靠定位线外端一侧(裁掉侵入分流板内部的段)
+                        (setq e-out (let ((pw (dt:jrt2-near-pt
+                                       (dt:jrt2-line-x-curve stub wall) sa)))
+                                (if (and pw (< (distance sa pw) (distance ea pw))) ea sa))
+                              nch1 (dt:jrt2-trim-line ch1 fp1 e-out)
+                              nch2 (dt:jrt2-trim-line ch2 fp2 e-out))
                         (setq out (vl-remove wall srcs))
                         (if p1 (setq out (cons p1 out)))
                         (if p2 (setq out (cons p2 out)))
@@ -2573,7 +2579,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.21 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.22 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)

@@ -1,5 +1,8 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.9
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.0
+;;; v11.0  : 压线板卡死防御(用户实测 CX 卡死/CPU 满): 间距 <10 视为误填
+;;;          按 125 处理; 每壁上限 100 幅(超限截断并警告); 规划/放置阶段
+;;;          打印进度 —— 卡死时可从输出定位阶段。
 ;;; v10.8  : 修复压线板"函数错误: LAMBDA" —— dt:cx-yxb-place 局部计数器 n
 ;;;          与 dt:cx-yxb-draw 参数 n 撞名(AutoLISP 大小写不敏感 + 动态作用
 ;;;          域, 外层局部污染内层 lambda 自由变量), 分别改名 n-old / nrm。
@@ -1469,11 +1472,14 @@
 
 ;; 放置(v10.7, 删源线后调用): 按间距无条件均匀放置(不做碰撞判断 —— 用户定案)。
 ;; plans = ((sp u n0 L) ...), 返回放置总数。
-(defun dt:cx-yxb-place (plans gap / doc n-old placed sp u n0 L d p-base)
+(defun dt:cx-yxb-place (plans gap / doc n-old placed sp u n0 L d p-base cnt)
+  ;; v11.0 卡死防御: 间距 <10 视为误填按 125 处理; 每壁上限 100 幅;
+  ;; 阶段打印(用户可从输出判断卡在哪个阶段)。
+  (if (or (null gap) (< gap 10.0))
+    (progn (princ "\n【压线板】间距参数无效, 已按 125mm 处理。")
+           (setq gap 125.0)))
   (setq placed 0)
   (cond
-    ((<= gap 0.0)
-     (princ "\n【压线板】间距参数 <= 0, 已跳过压线板布置(请检查参数设置)。"))
     ((null plans)
      (princ "\n【压线板】无可放置的壁(规划为空)。"))
     (T
@@ -1484,15 +1490,18 @@
        (vl-catch-all-apply 'vla-delete (list o))
        (setq n-old (1+ n-old)))
      (if (> n-old 0) (princ (strcat "\n【压线板】已清理旧实例 " (itoa n-old) " 个。")))
+     (princ (strcat "\n【压线板】开始放置: \n" 
+                    + "壁 " (itoa (length plans)) " 条, 间距 " (rtos gap 2 1) "mm..."))
      (foreach pn plans
        (setq sp (car pn) u (cadr pn) n0 (caddr pn) L (cadddr pn)
-             d gap)
-       (while (<= (+ d 16.6) L)
+             d gap cnt 0)
+       (while (and (< cnt 100) (<= (+ d 16.6) L))
          (setq p-base (list (+ (nth 0 sp) (* (nth 0 u) d))
                             (+ (nth 1 sp) (* (nth 1 u) d)) 0.0))
          (dt:cx-yxb-draw p-base u n0 "YXB")
-         (setq placed (1+ placed)
-               d (+ d gap))))
+         (setq placed (1+ placed) cnt (1+ cnt) d (+ d gap)))
+       (if (>= cnt 100)
+         (princ "\n【压线板】警告: 该壁已达 100 幅上限, 剩余截断。")))
      (princ (strcat "\n【压线板】完成: 共放置 " (itoa placed) " 幅(间距 "
                     (rtos gap 2 1) "mm, 无碰撞判断)。"))))
   placed)
@@ -1711,7 +1720,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v10.9 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v11.0 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

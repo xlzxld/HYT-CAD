@@ -20,7 +20,14 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.7
+;;; 版本: v2.8
+;;; v2.8  : 修复精雕图层合并未生效 + 层名改英文(用户实测反馈):
+;;;         ①根因 = 临时实体在 cur-doc 而 v2.7 只在 tgt 建"精雕"层,
+;;;           put-layer 因层不存在静默失败 —— 两个文档都 ensure JD 层;
+;;;         ②层名 "精雕" → "JD"(用户要求不用中文);
+;;;         ③copyobjects 后把目标图中 FLB/LS/RZ/DK/JRT/DP/ZJJ 残留实体
+;;;           全部移入 JD 层并删除这些原图层(dt:sz-migrate-layers);
+;;;         ④线切割撤销 v2.7 的 flatten(目标本就单层, 用户确认无需处理)。
 ;;; v2.7  : 曲线合并单图层保色 + 换行数量参数化(用户需求):
 ;;;         ①精雕: 正反面各自合并到单一图层"精雕"(层色白), 逐实体保留
 ;;;           原色 —— ByLayer(0) 的先转存原图层 ACI 色再换层(dt:sz-flatten-layer);
@@ -836,6 +843,28 @@
   (foreach o objs (vl-catch-all-apply 'vla-put-layer (list o new-layer)))
   objs)
 
+;; v2.8: 目标图纸中把 src-layers 图层上的所有模型空间实体移入 dst-layer,
+;; 然后删除这些原图层(空层才能删, 删不掉 catch 跳过)。
+(defun dt:sz-migrate-layers (doc dst-layer src-layers / ms n i o lay done)
+  (setq ms (vla-get-modelspace doc)
+        n  (vla-get-count ms)
+        i  0
+        done 0)
+  (while (< i n)
+    (setq o (vla-item ms i)
+          i (1+ i))
+    (setq lay (vl-catch-all-apply 'vla-get-layer (list o)))
+    (if (and (not (vl-catch-all-error-p lay)) lay
+             (member (strcase lay) (mapcar 'strcase src-layers)))
+      (progn
+        (vl-catch-all-apply 'vla-put-layer (list o dst-layer))
+        (setq done (1+ done)))))
+  (foreach ln src-layers
+    (vl-catch-all-apply 'vla-delete
+      (list (vl-catch-all-apply 'vla-item
+              (list (vla-get-layers doc) ln)))))
+  done)
+
 ;; 在当前已打开的文档集合中按路径查找文档
 ;; v2.4: 收集目标图纸指定图层上的 MText 实体(排版网格的单位标记:
 ;; 每幅输出的工件恰好带 1 个文件名标注文字)
@@ -947,7 +976,7 @@
                             tmp-dir tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
-                            box-gap per-row grid-n grid-col txt-list txt-infos txt-min-y row-maxx y-top ip-t txt-bb
+                            box-gap per-row grid-n grid-col txt-list txt-infos txt-min-y row-maxx y-top ip-t txt-bb migrated
                             unit-w ax bx1 by1 bx2 by2 box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
@@ -1052,9 +1081,10 @@
               (princ "\n【错误】克隆源图元失败。")
               nil)
             (progn
-              ;; 若指定目标图层(线切割置入 FLB)，合并到单层并保留原色(v2.7)
+              ;; 若指定目标图层(如线切割置入 FLB)，统一设置
               (if target-layer
-                (dt:sz-flatten-layer tgt-doc front-objs target-layer))
+                (foreach o front-objs
+                  (vl-catch-all-apply 'vla-put-layer (list o target-layer))))
 
               ;; 4b. 旋转摆正: 若源工件倾斜，所有正面曲线一起旋转摆正
               (if (and rot-ang (> (abs rot-ang) 1e-3))
@@ -1112,12 +1142,16 @@
                         ;; 手动框选模式: 100% 全部保留，正反面均不执行任何删除
                         nil)))
 
-                  ;; 4d+. v2.7 精雕: 正反面各自合并到单一图层"精雕"并保留原色
+                  ;; 4d+. v2.8 精雕: 正反面合并到单一图层"JD"并保留原色。
+                  ;; 注意: 临时实体在 cur-doc —— put-layer 前两个文档都必须
+                  ;; 已有 JD 层(v2.7 只建了 tgt 侧, cur-doc 无层致 put-layer
+                  ;; 静默失败 = "图形没移动"根因)
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "精雕" 7)
-                      (dt:sz-flatten-layer tgt-doc front-objs "精雕")
-                      (dt:sz-flatten-layer tgt-doc back-objs "精雕")))
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 7)
+                      (dt:sz-ensure-doc-layer cur-doc "JD" 7)
+                      (dt:sz-flatten-layer tgt-doc front-objs "JD")
+                      (dt:sz-flatten-layer tgt-doc back-objs "JD")))
 
                   ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
                   ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
@@ -1157,6 +1191,17 @@
                   (foreach o export-objs
                     (vl-catch-all-apply 'vla-delete (list o)))
                   (vla-endundomark cur-doc)
+                  ;; 6.5) v2.8 精雕: 目标图中原 FLB 系图层实体并入 JD 层并删原层
+                  (if (equal title "精雕")
+                    (progn
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 7)
+                      (setq migrated (dt:sz-migrate-layers
+                                       tgt-doc "JD"
+                                       (list "FLB" "LS" "RZ" "DK" "JRT" "DP" "ZJJ")))
+                      (if (> migrated 0)
+                        (princ (strcat "
+【精雕】已将 " (itoa migrated)
+                                       " 个实体并入 JD 图层, 原图层已移除。")))))
 
                   ;; 7) 在目标图纸工件上方居中标注原图纸文件名 (字高 15，多行居中对齐，距离工件顶沿 50mm 防遮挡)
                   (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
@@ -1544,5 +1589,5 @@
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.7 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.8 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)
