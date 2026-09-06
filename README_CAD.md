@@ -7,7 +7,7 @@
 > **按版本选文件（重要）**：
 > - AutoCAD **2021 及以上**用 `scripts\` 里的脚本（UTF-8 with BOM 编码，现代 Unicode LISP 引擎原生支持）；
 > - AutoCAD **2007 ~ 2020** 车间老旧电脑必须用 `scripts_ansi\` 里的同名脚本（GBK 编码，拷贝时覆盖到 `scripts\` 再加载）——老版 CAD 读 UTF-8 会报「错误: 输入中的点位置不正确」。
-> 当前版本：flb_runner **v10.8** / cx_runner **v10.8** / jrt_runner **v9.20** / wx_runner **v2.6** / dt_start **v3.2** / demo_recorder **v1.1**
+> 当前版本：flb_runner **v10.8** / cx_runner **v10.9** / jrt_runner **v9.21** / wx_runner **v2.7** / dt_start **v3.2** / demo_recorder **v1.1**
 > （v2.9 = 低版本安装报错修复，AutoCAD **2007 实测通过**；详见第 7 节「版本兼容」）。
 
 ---

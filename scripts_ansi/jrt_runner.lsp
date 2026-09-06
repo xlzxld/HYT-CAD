@@ -1,5 +1,13 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.20
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.21
+;;; v9.21  : 根治"no function definition: DT:JRT2-HOOK-ONE"(坑 #73):
+;;;          v9.17 引入的 dt:jrt-undo-mark 函数体少 1 个右括号, 其 defun
+;;;          吞掉了后续多个函数的 defun(含 ch-exist 区段与 hook-one —— 两处
+;;;          缺口叠加, 文件总平衡却为 0, 字符串匹配型检查全部漏检)。被吞
+;;;          函数加载时只是内层表达式, 永不定为全局函数, 运行期必报
+;;;          no function definition。修复: undo-mark 补闭合 + ch-exist 尾
+;;;          补闭合(程序化计算, 非手数); 新增 tools\check_defun_depth.py
+;;;          门禁(defun 行首深度必须为 0)防再犯。
 ;;; v9.17  : 修复 v9.16 运行报「调用(*push-error-using-command*)前无法从
 ;;;          *error* 调用(command)」(坑 #69 在本文件的残留): ①根因 = 出线口
 ;;;          交点解析误用 cadr 取 dt:cross-points 的返回对 (obj . pts) ——
@@ -149,6 +157,12 @@
   (vl-catch-all-apply
     '(lambda ( )
        (vla-StartUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
+
+(defun dt:jrt-undo-end ( )
+  (vl-catch-all-apply
+    '(lambda ( )
+       (vla-EndUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
+
 
 (defun dt:jrt-undo-end ( )
   (vl-catch-all-apply
@@ -1676,6 +1690,7 @@
                     (if (< (abs (- (abs dd) halfw)) 0.5)
                       (setq found T))))))))))
   found)
+)
 
 ;; 曲线与直线实体的交点列表(取该曲线一侧; 无交点 nil)
 ;; v9.17: dt:cross-points 每对为 (obj . pts) —— 交点列表用 cdr 取(此前误用
@@ -1863,7 +1878,7 @@
                         (princ (strcat "\n【通用二】出线口已开: 通道偏移 ±"
                                        (rtos halfw 2 1) " + 过渡弧 R"
                                        (rtos r 2 1) "。"))
-                        out))))))))))))))))
+                        out)))))))))))))))
 
 ;; 出线口总控(v9.16): 对每条 JRTDW 直线定位短线, 在其外壁上开 S 形出线口。
 ;; 返回更新后的 srcs(生成件/切口段均为持久源线)。
@@ -2558,7 +2573,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.20 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.21 已加载(多模板: 通用一/通用二; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线即可, 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)

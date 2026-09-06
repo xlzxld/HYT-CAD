@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.8
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v10.9
 ;;; v10.8  : 修复压线板"函数错误: LAMBDA" —— dt:cx-yxb-place 局部计数器 n
 ;;;          与 dt:cx-yxb-draw 参数 n 撞名(AutoLISP 大小写不敏感 + 动态作用
 ;;;          域, 外层局部污染内层 lambda 自由变量), 分别改名 n-old / nrm。
@@ -1396,18 +1396,19 @@
 
 ;; 模板实例绘制: o = 重合线起点(壁上), u = 壁方向单位向量, n = 外侧法向单位
 ;; 向量(本地 +Y→u, +X→n; 弧角度随旋转平移)。返回新建实体 vla 列表(YXB 层)
-(defun dt:cx-yxb-draw (o u nrm layer / xfn a1 ents e t1 t2)
-  (setq xfn '(lambda (lx ly)
-               (list (+ (car o) (* (car u) ly) (* (car nrm) lx))
-                     (+ (cadr o) (* (cadr u) ly) (* (cadr nrm) lx))
-                     0.0))
-        a1 (angle '(0.0 0.0 0.0) n)
+(defun dt:cx-yxb-map-pt (lx ly o u nrm)
+  (list (+ (car o) (* (car u) ly) (* (car nrm) lx))
+        (+ (cadr o) (* (cadr u) ly) (* (cadr nrm) lx))
+        0.0))
+
+(defun dt:cx-yxb-draw (o u nrm layer / a1 ents e t1 t2)
+  (setq a1 (angle '(0.0 0.0 0.0) nrm)
         ents nil)
   (foreach e (dt:cx-yxb-tpl)
-    (setq t1 (xfn (nth 1 e) (nth 2 e)))
+    (setq t1 (dt:cx-yxb-map-pt (nth 1 e) (nth 2 e) o u nrm))
     (cond
       ((= (car e) "LINE")
-       (setq t2 (xfn (nth 3 e) (nth 4 e))
+       (setq t2 (dt:cx-yxb-map-pt (nth 3 e) (nth 4 e) o u nrm)
              ents (cons (vla-addline (dt:ms) (vlax-3d-point t1) (vlax-3d-point t2))
                         ents)))
       ((= (car e) "ARC")
@@ -1710,7 +1711,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v10.8 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
+(princ "\n出线槽工具 v10.9 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

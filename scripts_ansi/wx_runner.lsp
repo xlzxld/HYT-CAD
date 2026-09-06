@@ -20,7 +20,12 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.6
+;;; 版本: v2.7
+;;; v2.7  : 曲线合并单图层保色 + 换行数量参数化(用户需求):
+;;;         ①精雕: 正反面各自合并到单一图层"精雕"(层色白), 逐实体保留
+;;;           原色 —— ByLayer(0) 的先转存原图层 ACI 色再换层(dt:sz-flatten-layer);
+;;;         ②线切割: 置入 FLB 层同样走 flatten 保色(原 put-layer 丢色);
+;;;         ③每行幅数参数化: ini [排版] per_row(默认 4), 改 5 即 5 幅一行。
 ;;; v2.6  : 修复追加报 numberp nil + 包络盒内部边距(用户实测反馈):
 ;;;         ①grid-col 漏初始化 —— 首幅(无既有文字)不进计数循环所以
 ;;;           成功, 追加时 (1+ nil) 抛 numberp: nil, 补 setq grid-col 0;
@@ -75,8 +80,7 @@
 ;; ============================================================================
 
 ;; AutoLISP 环境补丁: stringp 函数垫片 (原生 AutoLISP 无此函数, 坑 #68)
-(if (null (boundp 'stringp))
-  (defun stringp (x) (= (type x) 'STR)))
+(if (null (boundp 'stringp)) (defun stringp (x) (= (type x) 'STR)))
 
 ;; 当前文档模型空间(集中获取, 避免各函数重复拼 vla-get 链)
 (defun dt:ms ()
@@ -812,6 +816,26 @@
     (vl-catch-all-apply 'vla-put-color (list lay color)))
   lay)
 
+;; v2.7: 把一组实体合并到单一图层并保留原色 —— 实体色为 ByLayer(0) 的,
+;; 先转存其原图层 ACI 色再换层(换层后 ByLayer 会跟随新层色而丢色);
+;; 原色为显式色的直接保留。返回 objs。
+(defun dt:sz-flatten-layer (doc objs new-layer / o c lyr-col)
+  (foreach o objs
+    (vl-catch-all-apply
+      '(lambda ( )
+         (setq c (vla-get-color o))
+         (if (= c 0)
+           (progn
+             (setq lyr-col 7)
+             (vl-catch-all-apply
+               '(lambda ( )
+                  (setq lyr-col (vla-get-color
+                                  (vla-item (vla-get-layers doc) (vla-get-layer o))))))
+             (vla-put-color o lyr-col))))
+      nil))
+  (foreach o objs (vl-catch-all-apply 'vla-put-layer (list o new-layer)))
+  objs)
+
 ;; 在当前已打开的文档集合中按路径查找文档
 ;; v2.4: 收集目标图纸指定图层上的 MText 实体(排版网格的单位标记:
 ;; 每幅输出的工件恰好带 1 个文件名标注文字)
@@ -923,14 +947,16 @@
                             tmp-dir tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
-                            box-gap grid-n grid-col txt-list txt-infos txt-min-y row-maxx y-top ip-t txt-bb
+                            box-gap per-row grid-n grid-col txt-list txt-infos txt-min-y row-maxx y-top ip-t txt-bb
                             unit-w ax bx1 by1 bx2 by2 box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
         docs    (vla-get-documents acad)
         ;; v2.5: 盒间距单参数(wx_runner.ini [排版] box_gap, 默认 100mm) ——
         ;; 行/列追加与包络盒间距统一用它, 上下左右恒定
-        box-gap (atof (dt:sz-cfg-get "排版" "box_gap" "100.0")))
+        box-gap (atof (dt:sz-cfg-get "排版" "box_gap" "100.0"))
+        ;; v2.7: 每行幅数可配置(ini [排版] per_row, 默认 4; <=0 回退 4)
+        per-row (max 1 (atoi (dt:sz-cfg-get "排版" "per_row" "4"))))
 
   ;; 0) 预先探测源图形的整体倾斜角 (用于后续正交旋转摆正)
   (setq rot-ang (dt:sz-detect-tilt-angle cands))
@@ -999,7 +1025,7 @@
           (cond
             ((= grid-n 0)
              (setq ins-x 0.0 y-top 0.0))                      ; 首幅(基线 0, 4e 回填)
-            ((< grid-col 4)
+            ((< grid-col per-row)
              (setq ins-x (if (> row-maxx -1e98)
                            (+ row-maxx 20.0 box-gap)          ; 盒右缘 + 盒间距
                            box-gap)
@@ -1026,10 +1052,9 @@
               (princ "\n【错误】克隆源图元失败。")
               nil)
             (progn
-              ;; 若指定目标图层(如线切割置入 FLB)，统一设置
+              ;; 若指定目标图层(线切割置入 FLB)，合并到单层并保留原色(v2.7)
               (if target-layer
-                (foreach o front-objs
-                  (vl-catch-all-apply 'vla-put-layer (list o target-layer))))
+                (dt:sz-flatten-layer tgt-doc front-objs target-layer))
 
               ;; 4b. 旋转摆正: 若源工件倾斜，所有正面曲线一起旋转摆正
               (if (and rot-ang (> (abs rot-ang) 1e-3))
@@ -1086,6 +1111,13 @@
                           (setq back-objs (reverse keep-back)))
                         ;; 手动框选模式: 100% 全部保留，正反面均不执行任何删除
                         nil)))
+
+                  ;; 4d+. v2.7 精雕: 正反面各自合并到单一图层"精雕"并保留原色
+                  (if (equal title "精雕")
+                    (progn
+                      (dt:sz-ensure-doc-layer tgt-doc "精雕" 7)
+                      (dt:sz-flatten-layer tgt-doc front-objs "精雕")
+                      (dt:sz-flatten-layer tgt-doc back-objs "精雕")))
 
                   ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
                   ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
@@ -1512,5 +1544,5 @@
   (princ)
 )
 
-(princ "\n热流道外协与测量工具 wx_runner v2.6 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
+(princ "\n热流道外协与测量工具 wx_runner v2.7 已加载。可用命令: FLBSZ(测量) / XQG(线切割) / JD(精雕) / SJTZ(数据图纸)。")
 (princ)
