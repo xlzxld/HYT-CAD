@@ -1,5 +1,20 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.24
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.25
+;;; v9.25  : 用户实测修复(崩溃 + 方向判据换用户方案):
+;;;          ①根治 "参数类型错误: numberp: nil"(v9.24 引入): vlax-curve 的
+;;;            getpointatparam/getdistatparam 越界会返回 nil 而不抛错
+;;;            (实证范本 wx_runner 采样函数双判写法), v9.24 新助手只判
+;;;            error-p → nil 点混入边集 → (min (cadr a) nil) 崩; 全线补
+;;;            (error-p)+非nil 双判(curve-edges/curve-len/mid-pt/pt-inside);
+;;;          ②内偏主判据改用户定案规则: 锚段两候选各整环传播成 RingA/RingB
+;;;            (新 dt:jrt2-propagate 非破坏式), 分别求"环到 FLB 壁的平均
+;;;            最近距离"(dt:jrt2-flb-score), 距 FLB 更近者=方向反了 → 取
+;;;            更远环 —— JRT 恒朝内不再依赖任何线画法; 围合区域奇偶判定
+;;;            降为回退 1, JRTDW 就近回退 2;
+;;;          ③判定阶段零删除、胜者定后一次性清理落选候选; 候选创建即登记
+;;;            句柄进 *jrt2-made* —— 任何中途出错, 下次运行先自动清走废线;
+;;;          ④"内向偏移次数失效"实为 ① 的伴生现象(崩溃在删除落选候选之前,
+;;;            ±两圈同时留在 JRT 层); 已修, 重测前请先手动删掉崩溃残留环。
 ;;; v9.24  : 方向随机根治(用户定案: JRTDW 手绘习惯不该决定内外):
 ;;;          ①嵌套内偏不再"朝 JRTDW 选边", 改几何判定 —— "内" = 该条
 ;;;            轮廓围合区域的内部(轮廓采样成边集+自由端贪心配对封口,
@@ -108,12 +123,13 @@
 ;;;               默认参数下 40-11=29 恰为 RZ 圆心, 与圆帽外轮廓一致);
 ;;;               < 半宽 时画直线封闭线+两端解析法圆角, 侧线端头修到切点,
 ;;;               裁掉端点平面方向多余的线段。
-;;;          "通用二"模板(v9.9, v9.10 扩展出线口, v9.24 方向判定几何化):
+;;;          "通用二"模板(v9.9, v9.10 扩展出线口, v9.24/25 方向判定几何化):
 ;;;          源线="JRT"图层手画曲线(非 LD), 参数= 向内偏移步长/内向偏移
 ;;;          次数/出线颈线长度/出线颈线偏移/出线封口圆角R/出线相交圆角R;
-;;;          第 k 层把每段源线向"轮廓围合区域的内侧"内偏 k×步长(v9.24:
-;;;          射线法判内外, 与 JRTDW 画向无关; JRTDW 只标记出线口位置,
-;;;          仅在轮廓不可判定围合区域时兜底); 不裁剪/不倒角/不端帽 ——
+;;;          第 k 层把每段源线向"内侧"内偏 k×步长(v9.25 判据链: 锚段两
+;;;          候选各整环传播, 取离 FLB 壁更远的一环=朝内(用户定案); FLB
+;;;          不可测→围合区域射线法→JRTDW 就近兜底; 与 JRTDW 画向无关);
+;;;          不裁剪/不倒角/不端帽 ——
 ;;;          出线的每个"头"用一条直线把最外侧与最内侧端头连起来(两头各
 ;;;          一条)成闭环; 源线保留, 上一轮产物按句柄记忆在重跑时先删。
 ;;;          出线口(v9.10): JRTDW 与 "FLB" 相交, 从交点朝 FLB 外侧(v9.24,
@@ -1455,6 +1471,8 @@
 
 ;; 单段源线 ±dist 各试偏一次, 返回成功创建的候选 vla 列表(0~2 个, 已置
 ;; layer 层; 选边由 dt:jrt2-layer 传播完成, 本函数不做方向判断)
+;; v9.25: 创建即登记句柄到 *jrt2-made* —— 任何中途出错留下的落选废候选,
+;; 下次运行步骤 2 都能按句柄自动清走(旧版只在结束时登记, 崩溃即失控)
 (defun dt:jrt2-cands (obj dist layer / r lst v sgn)
   (setq lst nil)
   (foreach sgn (list dist (- dist))
@@ -1463,6 +1481,10 @@
       (progn
         (setq v (car (vlax-safearray->list (vlax-variant-value r))))
         (vla-put-layer v layer)
+        (vl-catch-all-apply
+          '(lambda ( / h)
+             (setq h (vla-get-handle v))
+             (if (and h (stringp h)) (setq *jrt2-made* (cons h *jrt2-made*)))))
         (setq lst (cons v lst)))))
   lst)
 
@@ -1498,16 +1520,20 @@
 ;; ============================================================================
 
 ;; 曲线采样成连续边段 ((pa pb) ...); n=分段数(直线精确, 弧/多段线近似)
+;; v9.25: vlax-curve 系列越界时会"返回 nil 而不抛错"(实证范本 wx_runner
+;; dt:sz-curve-sample-pts), 光判 vl-catch-all-error-p 会让 nil 点混进边集,
+;; 下游 (min (cadr a) (cadr b)) 即炸 "参数类型错误: numberp: nil" —— 全部
+;; 双判 (error-p)+非nil
 (defun dt:jrt2-curve-edges (obj n / ep k prev p out)
   (setq ep (vl-catch-all-apply 'vlax-curve-getendparam (list obj)))
   (cond
-    ((vl-catch-all-error-p ep) nil)
+    ((or (vl-catch-all-error-p ep) (not (numberp ep))) nil)
     (T
      (setq out nil prev nil k 0)
      (while (<= k n)
        (setq p (vl-catch-all-apply 'vlax-curve-getpointatparam
                    (list obj (* ep (/ (float k) (float n))))))
-       (if (vl-catch-all-error-p p)
+       (if (or (vl-catch-all-error-p p) (null p))
          nil
          (progn
            (if prev (setq out (cons (list prev p) out)))
@@ -1531,14 +1557,17 @@
   edges)
 
 ;; 点在围合区域内?(+X 射线交点计数, 奇=内; edges=nil → 不可判定返回 nil)
+;; v9.25: 防御性跳过含非点端点的边(理论上 curve-edges 已滤净, 双保险)
 (defun dt:jrt2-pt-inside (pt edges / x y cnt e a b ix)
   (cond
     ((null edges) nil)
+    ((or (null pt) (null (car pt)) (null (cadr pt))) nil)
     (T
      (setq x (car pt) y (cadr pt) cnt 0)
      (foreach e edges
        (setq a (car e) b (cadr e))
-       (if (and (< (min (cadr a) (cadr b)) y)
+       (if (and (listp a) (listp b) (numberp (cadr a)) (numberp (cadr b))
+                (< (min (cadr a) (cadr b)) y)
                 (>= (max (cadr a) (cadr b)) y))
          (progn
            (setq ix (+ (car a) (/ (* (- y (cadr a)) (- (car b) (car a)))
@@ -1546,26 +1575,26 @@
            (if (> ix x) (setq cnt (1+ cnt))))))
      (= 1 (rem cnt 2)))))
 
-;; 曲线中点(失败返回 nil)
+;; 曲线中点(失败返回 nil; v9.25 nil 双判)
 (defun dt:jrt2-mid-pt (obj / ep p)
   (setq ep (vl-catch-all-apply 'vlax-curve-getendparam (list obj)))
   (cond
-    ((vl-catch-all-error-p ep) nil)
+    ((or (vl-catch-all-error-p ep) (not (numberp ep))) nil)
     (T
      (setq p (vl-catch-all-apply 'vlax-curve-getpointatparam (list obj (* ep 0.5))))
-     (if (vl-catch-all-error-p p) nil p))))
+     (if (or (vl-catch-all-error-p p) (null p)) nil p))))
 
-;; 曲线长度(失败返回 0.0)
+;; 曲线长度(失败返回 0.0; v9.25: getdistatparam 也可能返回 nil 而非抛错)
 (defun dt:jrt2-curve-len (obj / e d)
   (setq e (vl-catch-all-apply 'vlax-curve-getendparam (list obj)))
   (cond
-    ((vl-catch-all-error-p e) 0.0)
+    ((or (vl-catch-all-error-p e) (not (numberp e))) 0.0)
     (T
      (setq d (vl-catch-all-apply 'vlax-curve-getdistatparam (list obj e)))
-     (if (vl-catch-all-error-p d) 0.0 d))))
+     (if (or (vl-catch-all-error-p d) (not (numberp d))) 0.0 d))))
 
-;; 候选选边(v9.24): 中点落在轮廓围合区域内的"唯一"候选 = 内侧(JRT 恒朝内);
-;; 0 个或多个(该段两条都在内/都在外, 歧义) → 回退旧"离 JRTDW 近"规则
+;; 候选选边(v9.24, v9.25 起仅作 FLB 判据不可用时的回退): 中点落在轮廓围合区域
+;; 内的"唯一"候选 = 内侧; 0 个或多个(歧义) → 再回退"离 JRTDW 近"规则
 (defun dt:jrt2-pick-side (cands edges dw-vlas / c m ins)
   (setq ins nil)
   (foreach c cands
@@ -1576,88 +1605,167 @@
     (car ins)
     (dt:jrt2-pick-near cands dw-vlas)))
 
-;; 在 recs 中按 obj 取最新 rec(rec=(obj 候选列表 已选) )
-(defun dt:jrt2-rec-of (recs obj / r rec)
-  (foreach rec recs
-    (if (and (not r) (equal (car rec) obj)) (setq r rec)))
-  r)
+;; 曲线 5 个等距采样点(弧长参数; 零长曲线退化为起点; 全失败 nil)
+(defun dt:jrt2-samples (obj / L p fr out)
+  (setq L (dt:jrt2-curve-len obj) out nil)
+  (if (> L 0.0)
+    (foreach fr (list 0.1 0.3 0.5 0.7 0.9)
+      (setq p (vl-catch-all-apply 'vlax-curve-getpointatdist
+                  (list obj (* L fr))))
+      (if (and (not (vl-catch-all-error-p p)) p) (setq out (cons p out))))
+    (progn
+      (setq p (vl-catch-all-apply 'vlax-curve-getstartpoint (list obj)))
+      (if (and (not (vl-catch-all-error-p p)) p) (setq out (list p)))))
+  out)
 
-;; 一条源线的单层内偏选边(v9.24 根治: 方向不再依赖 JRTDW 画向):
-;;   "内" = 本条轮廓围合闭合区域的内部(区域边集 = 各段采样 + 自由端头
-;;   贪心配对封口; 点在区域内按 +X 射线奇偶规则判定);
-;;   锚段 = 条内最长段(判定最稳), 其候选取中点在区域内的唯一一侧;
-;;   其余段沿端点相接的轮廓链传播: 每段取"候选端头与已定邻段候选端头
-;;   最近"的一侧 —— 切线接头处同侧候选端点精确重合(距离0), 传播结果
-;;   与轮廓走向一致, 与画向无关;
-;;   歧义段(两候选都在内/都在外)与传播不到的孤立段回退按距 JRTDW 距离选边。
-;; 删除全部未选中候选, 返回选中 vla 对象列表(已置于 layer 层)
-(defun dt:jrt2-layer (bar dist layer dw-vlas / recs edges anchor ad d best queue
-                          curobj cur ch e-s e-e ref-pt obj2 rec2 s2 e2
-                          cnb dnb out obj c pt rec)
-  ;; 1) 生成候选(每段 ±dist)
+;; 单点到曲线组最小距离(全失败 nil)
+(defun dt:jrt2-pt-curves-dist (pt curves / cp d o best)
+  (setq best nil)
+  (foreach o curves
+    (setq cp (vl-catch-all-apply 'vlax-curve-getclosestpointto (list o pt)))
+    (if (and (not (vl-catch-all-error-p cp)) cp)
+      (progn
+        (setq d (distance pt cp))
+        (if (or (null best) (< d best)) (setq best d)))))
+  best)
+
+;; 曲线集整体 FLB 亲近度(v9.25 主判据核心): 每条曲线取"采样点到 FLB 的
+;; 最小距离", 再对曲线求均值。数值越大 = 离 FLB 壁越远 = 越朝板内。
+;; 曲线集空 / FLB 空 / 一切测距失败 → nil(不可判定)
+(defun dt:jrt2-flb-score (curves flb-vlas / o omin m d sum cnt)
+  (cond
+    ((or (null curves) (null flb-vlas)) nil)
+    (T
+     (setq sum 0.0 cnt 0)
+     (foreach o curves
+       (setq omin nil)
+       (foreach m (dt:jrt2-samples o)
+         (setq d (dt:jrt2-pt-curves-dist m flb-vlas))
+         (if (and d (or (null omin) (< d omin))) (setq omin d)))
+       (if omin (setq sum (+ sum omin) cnt (1+ cnt))))
+     (if (> cnt 0) (/ sum cnt) nil))))
+
+;; 从指定锚段指定候选出发, 沿端点相接链整环传播选边(v9.25 非破坏式:
+;; 只算选中表不删任何东西, 以便 A/B 两个种子各跑一遍后比较取舍)。
+;; recs=((obj 候选 已选)...); 返回 ((obj . 选中候选) ...) 选中表
+(defun dt:jrt2-propagate (recs seed-obj seed-cand / out queue curobj ch
+                              e-s e-e ref-pt pt obj2 rec2 s2 e2 cnb dnb c d)
+  (setq out (list (cons seed-obj seed-cand))
+        queue (list seed-obj))
+  (while queue
+    (setq curobj (car queue)
+          queue (cdr queue)
+          ch (cdr (assoc curobj out)))
+    (if ch
+      (foreach pt (list (vlax-curve-getstartpoint curobj)
+                        (vlax-curve-getendpoint curobj))
+        ;; 已选候选在本端点侧的端头 = 传播参考点
+        (setq e-s (vlax-curve-getstartpoint ch)
+              e-e (vlax-curve-getendpoint ch)
+              ref-pt (if (< (distance pt e-s) (distance pt e-e)) e-s e-e))
+        (foreach obj2 (mapcar 'car recs)
+          (setq rec2 (assoc obj2 recs))
+          (if (and (not (assoc obj2 out))
+                   (not (equal obj2 curobj)))
+            (progn
+              (setq s2 (vlax-curve-getstartpoint obj2)
+                    e2 (vlax-curve-getendpoint obj2))
+              (if (or (< (distance s2 pt) 0.5) (< (distance e2 pt) 0.5))
+                (progn
+                  ;; 取其候选端头离参考点最近者(切线接头处同侧端点重合距离0)
+                  (setq cnb nil dnb 1e99)
+                  (foreach c (nth 1 rec2)
+                    (setq e-s (vlax-curve-getstartpoint c)
+                          e-e (vlax-curve-getendpoint c)
+                          d (min (distance ref-pt e-s)
+                                 (distance ref-pt e-e)))
+                    (if (< d dnb) (setq dnb d cnb c)))
+                  (if cnb
+                    (progn
+                      (setq out (cons (cons obj2 cnb) out)
+                            queue (append queue (list obj2)))))))))))))
+  out)
+
+;; 一条源线的单层内偏选边(v9.25, 用户定案规则):
+;;   ① 每段 ±dist 双候选先全部建出(不先删);
+;;   ② 锚段=条内最长段, 其两个候选各作种子做整环链传播 → RingA/RingB;
+;;   ③ 主判据=离 FLB 壁距离: 两环各求 dt:jrt2-flb-score, 得分更大者
+;;     (离 FLB 更远) = 朝内 —— "偏移之后距 FLB 更近说明方向反了";
+;;     FLB 缺失或得分不可比 → 回退 v9.24 围合区域奇偶判定; 再不可 → v9.9
+;;     "离 JRTDW 近"兜底;
+;;   ④ 传播未及的孤立段按同一判据链单独裁决;
+;;   ⑤ 最后一次性删除全部落选候选(判定阶段零删除, 中途出错不留半圈废线;
+;;     候选创建即记句柄, 崩溃残留也会被下次运行步骤 2 清走)。
+;; 返回选中 vla 列表(已置于 layer 层)
+(defun dt:jrt2-layer (bar dist layer dw-vlas flb-vlas / recs anchor ad d
+                          sA sB ringA ringB edges edges-done out obj c rec
+                          cand found sc)
+  ;; ① 候选(±dist)
   (setq recs nil)
   (foreach obj bar
     (setq recs (cons (list obj (dt:jrt2-cands obj dist layer) nil) recs)))
-  ;; 2) v9.24: 围合区域边集; 锚段 = 最长段; 候选按"中点落在区域内"选边
-  (setq edges (dt:jrt2-region-edges bar))
+  ;; ② 锚段 = 最长段
   (setq anchor nil ad -1.0)
   (foreach rec recs
     (setq d (dt:jrt2-curve-len (car rec)))
     (if (> d ad) (setq ad d anchor rec)))
-  (if anchor
-    (progn
-      (setq best (dt:jrt2-pick-side (cadr anchor) edges dw-vlas)
-            recs (subst (list (car anchor) (cadr anchor) best) anchor recs)
-            queue (list (car anchor)))
-      ;; 3) 沿端点相接链传播选边
-      (while queue
-        (setq curobj (car queue)
-              queue (cdr queue)
-              cur (dt:jrt2-rec-of recs curobj)
-              ch (nth 2 cur))
-        (if ch
-          (foreach pt (list (vlax-curve-getstartpoint curobj)
-                            (vlax-curve-getendpoint curobj))
-            ;; 已选候选在本端点侧的端头 = 传播参考点
-            (setq e-s (vlax-curve-getstartpoint ch)
-                  e-e (vlax-curve-getendpoint ch)
-                  ref-pt (if (< (distance pt e-s) (distance pt e-e)) e-s e-e))
-            (foreach obj2 (mapcar 'car recs)
-              (setq rec2 (dt:jrt2-rec-of recs obj2))
-              (if (and (not (nth 2 rec2))
-                       (not (equal obj2 curobj)))
-                (progn
-                  (setq s2 (vlax-curve-getstartpoint obj2)
-                        e2 (vlax-curve-getendpoint obj2))
-                  (if (or (< (distance s2 pt) 0.5) (< (distance e2 pt) 0.5))
-                    (progn
-                      ;; 取其候选端头离参考点最近者
-                      (setq cnb nil dnb 1e99)
-                      (foreach c (nth 1 rec2)
-                        (setq e-s (vlax-curve-getstartpoint c)
-                              e-e (vlax-curve-getendpoint c)
-                              d (min (distance ref-pt e-s)
-                                     (distance ref-pt e-e)))
-                        (if (< d dnb)
-                          (setq dnb d cnb c)))
-                      (if cnb
-                        (progn
-                          (setq recs (subst (list obj2 (nth 1 rec2) cnb)
-                                            rec2 recs)
-                                queue (append queue (list obj2)))))))))))))))
-  ;; 4) 收集选中(孤立未达段回退按围合区域/距 JRTDW 选边), 删除未选中候选
-  (setq out nil)
+  ;; ③ 整环裁决(胜者统一放在 ringA; ringB 仅中间量)
+  (setq ringA nil ringB nil sA nil sB nil)
+  (cond
+    ((null anchor) nil)
+    ((>= (length (nth 1 anchor)) 2)
+     (setq ringA (dt:jrt2-propagate recs (car anchor) (car (nth 1 anchor)))
+           ringB (dt:jrt2-propagate recs (car anchor) (cadr (nth 1 anchor)))
+           sA (dt:jrt2-flb-score (mapcar 'cdr ringA) flb-vlas)
+           sB (dt:jrt2-flb-score (mapcar 'cdr ringB) flb-vlas))
+     (cond
+       ;; 主判据: 两环 FLB 距离得分可比 → 更大者(离 FLB 更远=朝内)胜
+       ((and sA sB)
+        (if (< sA sB) (setq ringA ringB)))
+       ;; 回退 1: 围合区域奇偶判定锚段选边 → 单环传播
+       (T
+        (setq edges-done T
+              edges (dt:jrt2-region-edges bar)
+              ringA (dt:jrt2-propagate recs (car anchor)
+                                       (dt:jrt2-pick-side (nth 1 anchor) edges dw-vlas))))))
+    ;; 锚段仅 1 候选(另一侧偏移失败): 直接作种子
+    ((car (nth 1 anchor))
+     (setq ringA (dt:jrt2-propagate recs (car anchor) (car (nth 1 anchor)))))
+    ;; 锚段无候选(极端): 不传播, 全部段走孤立裁决
+    (T (setq ringA nil)))
+  (setq out ringA)
   (foreach rec recs
-    (setq ch (nth 2 rec))
-    (if (null ch)
-      (setq ch (dt:jrt2-pick-side (nth 1 rec) edges dw-vlas)))
-    (if ch
-      (setq out (cons ch out))
+    (setq obj (car rec)
+          cand (cdr (assoc obj out)))
+    (if (null cand)
+      (progn
+        (setq found nil)
+        ;; 判据链: FLB 距离 → 围合区域 → JRTDW 就近
+        (if flb-vlas
+          (progn
+            (setq sc nil)
+            (foreach c (nth 1 rec)
+              (setq d (dt:jrt2-flb-score (list c) flb-vlas))
+              (if (and d (or (null sc) (> d (cdr sc)))) (setq sc (cons c d))))
+            (if sc (setq found (car sc)))))
+        (if (null found)
+          (progn
+            (if (null edges-done)
+              (progn (setq edges-done T
+                           edges (dt:jrt2-region-edges bar))))
+            (setq found (dt:jrt2-pick-side (nth 1 rec) edges dw-vlas))))
+        (if found (setq out (cons (cons obj found) out))))))
+  ;; ⑤ 收集选中 + 一次性删除落选候选
+  (setq found nil)
+  (foreach rec recs
+    (setq cand (cdr (assoc (car rec) out)))
+    (if cand
+      (setq found (cons cand found))
       (princ "\n【警告】两点式: 该段源线偏移失败, 已跳过。"))
     (foreach c (nth 1 rec)
-      (if (not (equal c ch))
+      (if (not (equal c cand))
         (vl-catch-all-apply 'vla-delete (list c)))))
-  out)
+  found)
 
 ;; 收集曲线列表的自由端头: 端点在 tol 内无其他曲线端点与之重合(切线接头
 ;; 端点重合, 不计); 闭合曲线(首尾端点重合)不计端头。
@@ -1999,12 +2107,14 @@
 
 (defun dt:jrt2-process ( / doc layers srcs bars dw-all dw-vlas bar-made made ents
                            kmap neck-ents obj obj-type len ends clns h
-                           nbar nlayers nclose k kmax d bar)
+                           nbar nlayers nclose k kmax d bar flb-v)
   ;; ---- 1) 源线与 JRTDW 定位层检查 ----
   (setq srcs (if (tblsearch "LAYER" "JRT") (dt:layer-vlas "JRT")))
   (if (null srcs)
     (princ "\n【提示】图层 \"JRT\" 上没有任何源线, 请先在 JRT 图层绘制加热条源线。")
     (progn
+      ;; v9.25: FLB 曲线集(嵌套内偏方向的判据, 一次收集全流程复用)
+      (setq flb-v (if (tblsearch "LAYER" "FLB") (dt:curves-only (dt:layer-vlas "FLB"))))
       (setq dw-all (if (tblsearch "LAYER" "JRTDW") (dt:layer-vlas "JRTDW"))
             dw-vlas nil)
       (foreach obj dw-all
@@ -2059,7 +2169,7 @@
               (setq d (* k *jrt-inner-step*))
               (if (> d 0.0)
                 (progn
-                  (setq ents (dt:jrt2-layer bar d "JRT" dw-vlas))
+                   (setq ents (dt:jrt2-layer bar d "JRT" dw-vlas flb-v))
                   (if ents
                     (progn
                       (setq bar-made (append bar-made ents)
@@ -2368,7 +2478,7 @@
                                 out-e (cons (vlax-vla-object->ename arc) out-e)))))
                     (princ "\n【警告】出线口: 相交处为弧段或未找到相接段, 暂不圆角。"))))))))
       (if (null out)
-        (princ "\n【提示】JRTDW 与 FLB 无相交点, 跳过出线口绘制。"))
+        (princ "\n【提示】JRTDW 与 FLB 无相交点, FLBJT 未生成 —— 请把 JRTDW 延长至与 FLB 相交后重跑(颈线只在与 FLB 相交处开出)。"))
       (dt:jrt-undo-end)
       out)))
 
@@ -2701,7 +2811,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.24 已加载(多模板: 通用一/通用二; 通用二内偏恒朝轮廓内侧/颈线恒朝FLB外侧, 与 JRTDW 画向无关; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.25 已加载(多模板: 通用一/通用二; 通用二内偏=整环离 FLB 更远者朝内/颈线恒朝 FLB 外侧, 与 JRTDW 画向无关; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线标记出线口即可(方向随意), 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)

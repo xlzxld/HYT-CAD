@@ -1,5 +1,13 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.2
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.3
+;;; v11.3  : 用户实测修复(v11.2 仍"两侧都放不出板"):
+;;;          ①根因 = find-wall 只认 AcDbLine, 源线用 PL 多段线画时通道壁
+;;;            也是多段线(偏移产物), 恒被判"非直线"跳过 → 新增
+;;;            dt:cx-yxb-segs-of 按曲线参数逐段拆壁实体(LWPolyline/2dPolyline/
+;;;            3DPolyline 直段参与、凸度≠0 弧段与 AcDbArc 按 v11.2 定案跳过),
+;;;            find-walls 收集全部匹配直段, plan 逐段规划(一条壁可产多段);
+;;;          ②无直段时打印自诊断: 弧段数/不平行数/侧不符数/垂距不符数 +
+;;;            最近中点垂距偏差 —— 失败原因一眼可见, 不再只说"未找到"。
 ;;; v11.2  : 压线板三项根治(用户定案, 新图样=更新后 tools\1.dxf):
 ;;;          ①卡死根因确诊并修复: dt:cx-yxb-find-wall 的 entnext 全库扫描
 ;;;            中, 唯一的推进语句误置于"实体是壁层直线"判断的 if 内 ——
@@ -1391,12 +1399,13 @@
         (princ "\n【出线槽】偏移失败(无通道壁生成)。")))))
 
 ;; ============================================================================
-;; 出线槽压线板(v11.2): 模板取自用户更新后 tools\1.dxf 的 D 形图样(见
+;; 出线槽压线板(v11.2/3): 模板取自用户更新后 tools\1.dxf 的 D 形图样(见
 ;; dt:cx-yxb-tpl) —— 重合线(左壁竖线, 长 16.6)贴出线槽一侧壁线, 主体朝通道
 ;; 外侧延伸 15.3mm(上下边 11 + 右端 R4.3 过渡弧×2, 旧模板的 2 条碎线与
 ;; 中部 R5.75 圆已删, 新图样不再有)。定位点 = 白线(通道源线)与重合线的
 ;; 交界点 = 重合线中点。规则: 重合线与壁线完全重合(斜壁同步旋转贴合);
 ;; 重合线中点沿壁按 cx_yxb_gap 均匀分布, 整组关于壁居中(两端留白相等);
+;; 壁候选=壁层直线与多段线直段(v11.3), 弧段暂跳过并计入自诊断;
 ;; 不做碰撞判断(v10.7 用户定案)。YXB 层青色 4, 由脚本独占: 每次运行先清
 ;; 空旧实例再重排。
 ;; ============================================================================
@@ -1441,19 +1450,23 @@
   (foreach ent ents (vla-put-layer ent layer))
   (reverse ents))
 
-;; 规划(v10.7, 删源线前调用): 每条源线选定侧的直壁 -> (sp u n0 L) 数据。
-
-;; sp = 壁起点(与源线同向化后), u = 壁方向单位向量, n0 = 外侧法向, L = 壁长。
-;; 只收集数据不动图元; 放置在删源线后由 dt:cx-yxb-place 执行。
-;; v11.2: find-wall 改返回 vla(源线零长/弧形壁均给出明确提示)。
+;; 规划(v10.7 引入, v11.3 改逐直段): 每条源线选定侧的壁直段 -> (sp u n0 L)
+;; 数据(一条壁可产多段)。sp = 段起点(与源线同向化后), u = 段方向单位向量,
+;; n0 = 外侧法向, L = 段长。只收集数据不动图元; 放置在删源线后由
+;; dt:cx-yxb-place 执行。无直段时打印自诊断(弧段/不平行/侧不符计数与
+;; 最近垂距偏差 —— 一眼看出差在哪个条件)。
 (defun dt:cx-yxb-plan (center-lines slot-layer src-enames side slot-dist /
-                       plans src wall-o sp ep u n0 pA pB ss2 ee2 ds dl L tmp)
+                       plans src res pieces n-arc n-notpar n-side n-dist dmin
+                       p sp ep u n0 pA pB ss2 ee2 ds dl L tmp nsrc)
+  (setq nsrc 0)
   (foreach src center-lines
-    (setq wall-o (dt:cx-yxb-find-wall src slot-layer src-enames side slot-dist))
-    (if wall-o
-      (progn
-        (setq sp (vlax-curve-getstartpoint wall-o)
-              ep (vlax-curve-getendpoint wall-o)
+    (setq nsrc (1+ nsrc)
+          res (dt:cx-yxb-find-walls src slot-layer src-enames side slot-dist)
+          pieces (nth 0 res) n-arc (nth 1 res) n-notpar (nth 2 res)
+          n-side (nth 3 res) n-dist (nth 4 res) dmin (nth 5 res))
+    (if pieces
+      (foreach p pieces
+        (setq sp (nth 0 p) ep (nth 1 p)
               sp (list (nth 0 sp) (nth 1 sp) 0.0)
               ep (list (nth 0 ep) (nth 1 ep) 0.0)
               L  (distance sp ep)
@@ -1474,12 +1487,24 @@
                            (+ (nth 1 sp) (* (nth 1 u) (* 0.5 L)) (* (nth 1 n0) 1.0)) 0.0)
                   pB (list (+ (nth 0 sp) (* (nth 0 u) (* 0.5 L)) (- (nth 0 n0)))
                            (+ (nth 1 sp) (* (nth 1 u) (* 0.5 L)) (- (nth 1 n0))) 0.0))
+            ;; 外侧法向 = 离源线更远的方向
             (if (< (dt:cx-yxb-pt-line-dist pA ss2 ds)
                    (dt:cx-yxb-pt-line-dist pB ss2 ds))
               (setq n0 (list (- (nth 0 n0)) (- (nth 1 n0)) 0.0)))
-            (setq plans (cons (list sp u n0 L) plans)))
-          (princ "\n【压线板】源线零长, 跳过。")))
-      (princ "\n【压线板】未找到该侧直壁(弧形通道暂不支持或参数不符), 跳过此出线槽。")))
+            (setq plans (cons (list sp u n0 L) plans))
+            )
+          (princ "\n【压线板】源线零长, 跳过。"))
+      (princ (strcat "\n【压线板】源线 " (itoa nsrc) " 该侧无直壁段: "
+                     "弧段 " (itoa n-arc) " 个(弧形段暂不放置), "
+                     "与源线不平行 " (itoa n-notpar) " 段, "
+                     "不在选定侧 " (itoa n-side) " 段, "
+                     "垂距不符 " (itoa n-dist) " 段"
+                     (if dmin
+                       (strcat "(最近中点垂距偏差 " (rtos dmin 2 2)
+                               "mm, 容差 0.5; 偏差大请核对 出线槽偏移 参数)")
+                       "(壁层无非零长直段: 检查 CX 层是否已生成通道壁)"))))
+    )
+  )
   (reverse plans))
 
 ;; 放置(v11.2, 删源线后调用): 重合线中点(定位点 = 与白线/源线的交界点)
@@ -1544,52 +1569,94 @@
   (sqrt (+ (* (- vx (* t- (nth 0 ld))) (- vx (* t- (nth 0 ld))))
            (* (- vy (* t- (nth 1 ld))) (- vy (* t- (nth 1 ld)))))))
 
-;; 找源线选定侧的直壁(v11.2 重写 —— 卡死根治):
-;;   旧版 entnext 全库扫描中, 唯一推进语句 `(setq e (entnext e))` 误置于
-;;   "(if (AcDbLine 且在该层) ...)" 内 —— 库内遇到任一非该层直线实体
-;;   (文字/块/其他层线)时 e 永不前进 → while 死循环(CPU 满载假死);
-;;   且逐源线重扫全库 O(全实体) COM 转换, 大图本身即数分钟级卡顿。
-;;   新版改用 dt:layer-vlas 按壁层取实体(foreach 天然有界), 仅直线参与,
-;;   条件不变: 与源线平行、中点垂距 ≈ slot-dist、中点在选定侧
-;;   (Left/Right 按源线 S→E 方向, 排除源线自身)。返回 vla 或 nil
-(defun dt:cx-yxb-find-wall (src slot-layer src-enames side slot-dist /
-                            ss2 ee2 ds dl o tp m1 m2 m vd vl dd found)
+;; 壁实体 → 段候选列表 ((sp ep is-arc) ...)(v11.3):
+;;   AcDbLine = 整条一段(直); AcDbArc = 一段标弧; LWPolyline/2dPolyline/
+;;   3D Polyline = 按曲线参数逐段拆(endparam 即段数), 凸度≠0 段标弧,
+;;   3D 折线 getbulge 抛错 → 按直段处理(与 wx 采样函数同款双判惯用法)
+(defun dt:cx-yxb-segs-of (o / oname ep n i p0 p1 b out)
+  (setq oname (vl-catch-all-apply 'vla-get-objectname (list o)))
+  (cond
+    ((vl-catch-all-error-p oname) nil)
+    ((= oname "AcDbLine")
+     (list (list (vlax-curve-getstartpoint o) (vlax-curve-getendpoint o) nil)))
+    ((= oname "AcDbArc")
+     (list (list (vlax-curve-getstartpoint o) (vlax-curve-getendpoint o) T)))
+    ((member oname '("AcDbLWPolyline" "AcDb2dPolyline" "AcDbPolyline"))
+     (setq ep (vl-catch-all-apply 'vlax-curve-getendparam (list o)))
+     (cond
+       ((or (vl-catch-all-error-p ep) (not (numberp ep))) nil)
+       (T
+        (setq n (fix (+ ep 1e-4)) i 0 out nil)
+        (while (< i n)
+          (setq p0 (vl-catch-all-apply 'vlax-curve-getpointatparam (list o (float i)))
+                p1 (vl-catch-all-apply 'vlax-curve-getpointatparam
+                       (list o (+ (float i) 1.0))))
+          (if (and (not (vl-catch-all-error-p p0)) p0
+                   (not (vl-catch-all-error-p p1)) p1)
+            (progn
+              (setq b (vl-catch-all-apply 'vla-getbulge (list o i)))
+              (setq out (cons (list p0 p1
+                              (if (and (not (vl-catch-all-error-p b)) (numberp b)
+                                       (> (abs b) 1e-9))
+                                T nil))
+                        out))))
+          (setq i (1+ i)))
+        out)))
+    (T nil)))
+
+;; 找源线选定侧的壁直段(v11.3, 替代 v11.2 find-wall):
+;;   扫描壁层实体并拆段(PL 多段线画的直壁自本版起支持); 直段条件不变:
+;;   与源线弦向平行、中点垂距 ≈ slot-dist、中点在选定侧(Left/Right 按
+;;   源线 S→E, 排除源线自身)。
+;;   返回 (直段列表 弧段数 不平行数 侧不符数 垂距不符数 垂距最小偏差)
+(defun dt:cx-yxb-find-walls (src slot-layer src-enames side slot-dist /
+                             ss2 ee2 ds dl o segs sp ep m vd vl dd dderr
+                             sidev pieces n-arc n-notpar n-side n-dist dmin)
   (setq ss2 (vlax-curve-getstartpoint src)
         ee2 (vlax-curve-getendpoint src)
         ss2 (list (nth 0 ss2) (nth 1 ss2) 0.0)
         ee2 (list (nth 0 ee2) (nth 1 ee2) 0.0)
         ds  (list (- (nth 0 ee2) (nth 0 ss2)) (- (nth 1 ee2) (nth 1 ss2)) 0.0)
         dl  (sqrt (+ (* (nth 0 ds) (nth 0 ds)) (* (nth 1 ds) (nth 1 ds))))
-        found nil)
+        pieces nil n-arc 0 n-notpar 0 n-side 0 n-dist 0 dmin nil)
   (if (> dl 1e-8)
     (progn
       (setq ds (list (/ (nth 0 ds) dl) (/ (nth 1 ds) dl) 0.0))
       (foreach o (dt:layer-vlas slot-layer)
-        (if (null found)
-          (progn
-            (setq tp (vl-catch-all-apply 'vla-get-objectname (list o)))
-            (if (and (not (vl-catch-all-error-p tp))
-                     (= tp "AcDbLine")
-                     (not (dt:excluded-p o src-enames)))
-              (progn
-                (setq m1 (vlax-curve-getstartpoint o)
-                      m2 (vlax-curve-getendpoint o)
-                      m  (list (* 0.5 (+ (nth 0 m1) (nth 0 m2)))
-                               (* 0.5 (+ (nth 1 m1) (nth 1 m2))) 0.0)
-                      vd (list (- (nth 0 m2) (nth 0 m1)) (- (nth 1 m2) (nth 1 m1)) 0.0)
-                      vl (sqrt (+ (* (nth 0 vd) (nth 0 vd)) (* (nth 1 vd) (nth 1 vd)))))
-                (if (> vl 1e-8)
-                  (progn
-                    (setq vd (list (/ (nth 0 vd) vl) (/ (nth 1 vd) vl) 0.0)
-                          dd (- (* (nth 0 ds) (nth 1 vd)) (* (nth 1 ds) (nth 0 vd))))
-                    (if (< (abs dd) 1e-4)
-                      (progn
-                        (setq dd (dt:cx-yxb-pt-line-dist m ss2 ds))
-                        (if (and (< (abs (- dd slot-dist)) 0.5)
-                                 (or (and (= (strcase side) "LEFT")  (> (- (* (nth 0 ds) (- (nth 1 m) (nth 1 ss2))) (* (nth 1 ds) (- (nth 0 m) (nth 0 ss2)))) 0.0))
-                                     (and (= (strcase side) "RIGHT") (< (- (* (nth 0 ds) (- (nth 1 m) (nth 1 ss2))) (* (nth 1 ds) (- (nth 0 m) (nth 0 ss2)))) 0.0))))
-                          (setq found o))))))))))))
-  found))
+        (if (not (dt:excluded-p o src-enames))
+          (foreach seg (dt:cx-yxb-segs-of o)
+            (cond
+              ((caddr seg) (setq n-arc (1+ n-arc)))
+              (T
+               (setq sp (list (nth 0 (car seg)) (nth 1 (car seg)) 0.0)
+                     ep (list (nth 0 (cadr seg)) (nth 1 (cadr seg)) 0.0)
+                     m  (list (* 0.5 (+ (nth 0 sp) (nth 0 ep)))
+                              (* 0.5 (+ (nth 1 sp) (nth 1 ep))) 0.0)
+                     vd (list (- (nth 0 ep) (nth 0 sp)) (- (nth 1 ep) (nth 1 sp)) 0.0)
+                     vl (sqrt (+ (* (nth 0 vd) (nth 0 vd)) (* (nth 1 vd) (nth 1 vd)))))
+               (if (> vl 1e-8)
+                 (progn
+                   (setq vd (list (/ (nth 0 vd) vl) (/ (nth 1 vd) vl) 0.0)
+                         dd (- (* (nth 0 ds) (nth 1 vd)) (* (nth 1 ds) (nth 0 vd))))
+                   (cond
+                     ;; 不平行
+                     ((>= (abs dd) 1e-4) (setq n-notpar (1+ n-notpar)))
+                     (T
+                      ;; 选定侧
+                      (setq sidev (- (* (nth 0 ds) (- (nth 1 m) (nth 1 ss2)))
+                                     (* (nth 1 ds) (- (nth 0 m) (nth 0 ss2)))))
+                      (cond
+                        ((not (or (and (= (strcase side) "LEFT")  (> sidev 0.0))
+                                  (and (= (strcase side) "RIGHT") (< sidev 0.0))))
+                         (setq n-side (1+ n-side)))
+                        (T
+                         ;; 中点垂距 ≈ slot-dist
+                         (setq dderr (abs (- (dt:cx-yxb-pt-line-dist m ss2 ds) slot-dist)))
+                         (if (or (null dmin) (< dderr dmin)) (setq dmin dderr))
+                         (cond
+                           ((< dderr 0.5) (setq pieces (cons (list sp ep) pieces)))
+                            (T (setq n-dist (1+ n-dist)))))))))))))))))
+  (list pieces n-arc n-notpar n-side n-dist dmin))
 
 
 ;; ============================================================================
@@ -1754,7 +1821,7 @@
 
 ;;; 加载时在命令行输出提示
 (dt:cx-cfg-boot)
-(princ "\n出线槽工具 v11.2 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 生成出线槽时自动布置压线板 —— 卡死已根治, 图样/定位按新图更新)。")
+(princ "\n出线槽工具 v11.3 已加载(参数默认值外置 cx_runner.ini 可记事本修改; 上次值自动记忆; 压线板=新 D 形图样, PL 多段线直壁段支持, 卡死已根治)。")
 (princ "\n提示: 垫片(DP)要在运行 CX 之前画好才会分流出 CXK; 无垫片时封闭线全部留在 CX。")
 (princ "\n用法1: 输入 CX 执行出线槽流程(弹出参数框, 确定后开始)。")
 (princ "\n用法2: 输入 CXPARAM 弹出参数设置对话框(只改参数不执行)。")

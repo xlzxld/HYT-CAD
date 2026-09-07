@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
-"""方向/排布算法回归(jrt v9.24 / cx v11.2) —— 纯 stdlib, 零依赖。
+"""方向/排布算法回归(jrt v9.24/25 + cx v11.2/3) —— 纯 stdlib, 零依赖。
 
 把 cx_runner/jrt_runner 中"与 AutoCAD 无关"的几何判定逻辑逐行移植为
 Python, 用图2/图3 场景与 tools/1.dxf 实测数据做断言:
   1) dt:jrt2-pt-inside   —— +X 射线奇偶点内判定
   2) dt:jrt2-region-edges —— 轮廓采样边集 + 自由端贪心配对封口
-  3) 嵌套内偏选边         —— 唯一"中点在内"候选(与 JRTDW 画向无关)
+  3) 嵌套内偏选边         —— 唯一"中点在内"候选(回退链的围合判定环)
   4) 颈线朝外规则         —— 靠近 FLB 中心则反向
   5) 压线板排布           —— 中点定位 + 整组居中(对照 1.dxf 实例坐标)
   6) 压线板模板几何       —— D 形 6 件首尾闭合
+  7) v9.25 整环 FLB 距离主判据 —— 取"离 FLB 更远"的候选环
+  8) v9.25 采样 nil 防护  —— 越界返回 nil 不成边、不可判内
+  9) v11.3 壁段分解+选侧  —— 多段线直段参与、弧段剔除、Left/Right 交叉
 运行: python tools/test_direction.py ; 退出码 0=全过。
 """
 import math
@@ -24,11 +27,15 @@ def check(name, cond):
         print("  FAIL %s" % name)
 
 
-# ---------- 1) 点内判定(移植 dt:jrt2-pt-inside) ----------
+# ---------- 1) 点内判定(移植 dt:jrt2-pt-inside, 含 v9.25 防护) ----------
 def pt_inside(pt, edges):
+    if pt is None:                       # v9.25 双判: nil 点不可判定
+        return False
     x, y = pt[0], pt[1]
     cnt = 0
     for a, b in edges:
+        if a is None or b is None:       # v9.25: 含非点端点的边直接跳过
+            continue
         if min(a[1], b[1]) < y <= max(a[1], b[1]):
             ix = a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
             if ix > x:
@@ -87,6 +94,85 @@ def pick_side(cand_mids, edges, dw_side_guess=None):
     return None  # 歧义 → lisp 回退 JRTDW 兜底
 
 
+# ---------- 7) v9.25 整环 FLB 距离主判据移植 ----------
+def pt_seg_dist(p, a, b):
+    ax, ay = a
+    bx, by = (b[0] - a[0], b[1] - a[1])
+    px, py = p[0] - ax, p[1] - ay
+    l2 = bx * bx + by * by
+    if l2 < 1e-12:
+        return math.hypot(px, py)
+    t = max(0.0, min(1.0, (px * bx + py * by) / l2))
+    return math.hypot(px - t * bx, py - t * by)
+
+
+def pt_curves_dist(pt, segs):
+    best = None
+    for a, b in segs:
+        d = pt_seg_dist(pt, a, b)
+        if best is None or d < best:
+            best = d
+    return best
+
+
+def flb_score(ring_segs, flb_segs):
+    """环上各段中点 → FLB 最小距离的均值(LISP 版 5 采样点的段中点简化)"""
+    if not ring_segs or not flb_segs:
+        return None
+    per = [pt_curves_dist(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), flb_segs)
+           for a, b in ring_segs]
+    return sum(per) / len(per) if per else None
+
+
+def pick_winner(ringA, ringB, flb_segs):
+    """移植 dt:jrt2-layer ③: (if (< sA sB) → 取B) —— 得分大(更远=内)者胜"""
+    sA = flb_score(ringA, flb_segs)
+    sB = flb_score(ringB, flb_segs)
+    if sA is None or sB is None:
+        return None
+    return 'B' if sA < sB else 'A'
+
+
+def curve_edges(points):
+    """移植 dt:jrt2-curve-edges(v9.25 nil 双判语义): None 点跳过不成边"""
+    out = []
+    prev = None
+    for p in points:
+        if p is None:
+            continue
+        if prev is not None:
+            out.append((prev, p))
+        prev = p
+    return out
+
+
+# ---------- 9) v11.3 壁段过滤移植(dt:cx-yxb-find-walls 判据) ----------
+def pt_line_dist(p, lp, ld):
+    vx, vy = p[0] - lp[0], p[1] - lp[1]
+    t = vx * ld[0] + vy * ld[1]
+    return math.hypot(vx - t * ld[0], vy - t * ld[1])
+
+
+def piece_parallel(piece, ds):
+    (ax, ay), (bx, by) = piece[0][:2], piece[1][:2]
+    vl = math.hypot(bx - ax, by - ay)
+    if vl < 1e-8:
+        return False
+    dd = abs(ds[0] * ((by - ay) / vl) - ds[1] * ((bx - ax) / vl))
+    return dd < 1e-4
+
+
+def mid_of(piece):
+    a, b = piece[0], piece[1]
+    return ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, 0.0)
+
+
+def side_of(piece, ss, ds, side):
+    m = mid_of(piece)
+    cr = ds[0] * (m[1] - ss[1]) - ds[1] * (m[0] - ss[0])
+    return cr > 0.0 if side == "LEFT" else cr < 0.0
+
+
 def main():
     print("[1] 点内判定(矩形)")
     e = ring_edges_rect(0, 0, 200, 400)
@@ -140,8 +226,7 @@ def main():
     for got, w in zip(centers, want):
         check("中点 %.4f ≈ %.4f(1.dxf 实例)" % (got, w), abs(got - w) < 0.01)
 
-    print("[6] 压线板模板: D 形 6 件首尾闭合 + 定位点=重合线中点")
-    # (类型, x, y, ...) 按 dt:cx-yxb-tpl 顺序
+    print("[6] 压线板模板: D 形 6 件首尾闭合 + 定位点=重合线中点")    # (类型, x, y, ...) 按 dt:cx-yxb-tpl 顺序
     coincident = ((0, 0), (0, 16.6))
     bottom = ((0, 0), (11, 0))
     top = ((0, 16.6), (11, 16.6))
@@ -169,6 +254,53 @@ def main():
           and abs(top[1][1] - (arc_tr_c[1] + arc_tr_r)) < 1e-9)
     check("重合线中点 = 定位点(0,8.3)",
           abs((coincident[0][1] + coincident[1][1]) / 2 - 8.3) < 1e-9)
+
+    print("[7] v9.25 整环 FLB 距离主判据: 取离 FLB 更远(朝内)的候选环")
+    flb = ring_edges_rect(0, 0, 800, 900)
+    src_ring = ring_edges_rect(200, 200, 600, 700)          # 板上加热门条外壁
+    ring_in = ring_edges_rect(204, 204, 596, 696)           # 内偏 4mm
+    ring_out = ring_edges_rect(196, 196, 604, 704)          # 外偏 4mm
+    s_in = flb_score(ring_in, flb)
+    s_out = flb_score(ring_out, flb)
+    s_src = flb_score(src_ring, flb)
+    check("内偏环得分 > 源环 > 外偏环", s_in > s_src > s_out)
+    check("种子序 A=外/B=内 → 胜者=内环", pick_winner(ring_out, ring_in, flb) == 'B')
+    check("种子序 A=内/B=外 → 胜者=内环", pick_winner(ring_in, ring_out, flb) == 'A')
+    check("FLB 缺失(得分 None) → 不可判(交回退链)",
+          flb_score(ring_in, []) is None)
+
+    print("[8] v9.25 采样 nil 防护")
+    guarded = curve_edges([None, (0, 0), (10, 0), None, (10, 10)])
+    check("nil 采样点不成边", all(a is not None and b is not None for a, b in guarded))
+    check("含 None 端点的边不影响点内判定(不抛异常)",
+          pt_inside((5, 5), [((0, 0), None), ((0, 0), (0, 20)),
+                             ((0, 20), (20, 20)), ((20, 20), (20, 0)),
+                             ((20, 0), (0, 0))]) is True)
+    check("nil 判据点 → 判外(False 不崩)", pt_inside(None, guarded) is False)
+
+    print("[9] v11.3 壁段分解 + 选侧(Left/Right, 直段参与, 弧段剔除)")
+    wall_rect = [((-17.5, 0), (-17.5, 400), False),   # 左壁直段(平行源线)
+                 ((-17.5, 400), (-35, 400), False),   # 顶横段(不平行)
+                 ((-35, 400), (-35, 0), False),       # 外直段(平行但侧距=35)
+                 ((-35, 0), (-17.5, 0), True)]        # 带凸度段=弧 → 剔除
+    ssrc = (0.0, 0.0, 0.0)
+    dsrc = (0.0, 1.0, 0.0)
+    got_l, got_r, n_arc = [], [], 0
+    for a, b, is_arc in wall_rect:
+        if is_arc:
+            n_arc += 1
+            continue
+        piece = ((a[0], a[1], 0.0), (b[0], b[1], 0.0))
+        if piece_parallel(piece, dsrc) and side_of(piece, ssrc, dsrc, "LEFT"):
+            got_l.append(piece)
+        if piece_parallel(piece, dsrc) and side_of(piece, ssrc, dsrc, "RIGHT"):
+            got_r.append(piece)
+    check("弧段计数 1 且不参与", n_arc == 1)
+    check("横段被平行滤除(左候选=2)", len(got_l) == 2)
+    check("LEFT 侧候选垂距均=17.5", all(
+        abs(pt_line_dist(mid_of(p), ssrc, dsrc) - 17.5) < 1e-9 or
+        abs(pt_line_dist(mid_of(p), ssrc, dsrc) - 35.0) < 1e-9 for p in got_l))
+    check("右壁源侧(RIGHT)候选=0(全部在左)", len(got_r) == 0)
 
     print()
     if FAIL:
