@@ -15,6 +15,8 @@ Python, 用图2/图3 场景与 tools/1.dxf 实测数据做断言:
   10) v9.26 颈线方向     —— L 形非凸 FLB 下奇偶判据对/包围盒判据错
   11) v9.26 采样密度     —— R=400 大弧 12 段吞探针 / 24 段判对
   12) v9.26 通道延伸     —— 壁"让开"3mm: ext=0 不交(复现日志), ext=5 命中
+  13) v9.27 长线裁剪     —— 端点里外分类与起笔无关, 保留段不含板内点
+  14) v9.27 短线回退     —— 两端同侧 → 分类弃权走 v9.22 启发式
 运行: python tools/test_direction.py ; 退出码 0=全过。
 """
 import math
@@ -355,6 +357,30 @@ def main():
         hit5 = segs_cross(extend_seg(ch, 5.0), wall)
         check("halfw=%+ .1f: ext=0 不交(复现日志跳过), ext=5 命中" % halfw,
               hit0 is False and hit5 is True)
+
+    print("[13] v9.27 长定位线里外分类与裁剪: 删板内伸出段, 外端延长保留")
+    loop = ring_edges_rect(150, 150, 450, 750)     # 外壁圈(图1 体育场轮廓)
+
+    def out_end(pa, pb, edges):
+        ia, ib = pt_inside(pa, edges), pt_inside(pb, edges)
+        if ia and not ib:
+            return pb
+        if ib and not ia:
+            return pa
+        return None
+    deep = (316.5, 600.0)                          # 埋板内的一端(含延伸)
+    outside = (316.5, 55.0)                        # 越过 FLB 外的一端(含延伸)
+    check("端点里外分类: 选外端(起笔在内)", out_end(deep, outside, loop) == outside)
+    check("端点里外分类: 与起笔方向无关", out_end(outside, deep, loop) == outside)
+    fp = (316.5, 138.0)                            # 切点在壁外侧(上方)
+    hi = max(fp[1], outside[1])
+    check("保留段[切点→外端]不含板内点", deep[1] > hi)
+
+    print("[14] v9.27 贴壁短定位线(旧画法): 分类返回 None → 回退旧启发式")
+    check("两端同在区域外 → 分类弃权",
+          out_end((316.5, 140.0), (316.5, 120.0), loop) is None)
+    check("两端同在区域内 → 分类弃权",
+          out_end((316.5, 600.0), (316.5, 500.0), loop) is None)
 
     print()
     if FAIL:

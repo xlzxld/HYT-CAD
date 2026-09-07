@@ -1,5 +1,17 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.26
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.27
+;;; v9.27  : 用户六图手工流程定稿(图2→图3 的裁剪/复原步):
+;;;          ①硬 bug: v9.22 的 pw=stub×wall 求交写在 (vla-delete wall) 之后,
+;;;            对已删实体求交恒失败 → e-out 退化成"起笔端", 通道线保留侧
+;;;            随画向翻转(留里删外)—— 移到删除之前计算, 兜底路径自此可用;
+;;;          ②里外判定几何化: 定位线两端按轮廓围合区域(dt:jrt2-region-
+;;;            edges-n+pt-inside)分里外 —— 长定位线一头埋板内时, 不再用
+;;;            "离外壁交点远=板边"错误假设; 过渡弧方向 d=里端→外端,
+;;;            切点/弧向/开口全部朝板边(图4); 通道线裁剪保留[切点→板边端]
+;;;            (板内伸出段连同内端延长删除, 外端延长复原保留, 图3), 新助手
+;;;            dt:jrt2-out-end/dt:jrt2-seg-rebuild; 两端同里/同外(贴壁短线
+;;;            旧画法) → 自动回退 v9.22 启发式, 行为不变;
+;;;          ③封口规则不动(用户定案): 圆弧连接正确后, 封线只出现在出线端。
 ;;; v9.26  : 用户三轮实测修复:
 ;;;          ①新增参数 jrt2_hook_ext(出线口通道延伸, 默认 5.0, 进参数框/
 ;;;            ini/记忆; 填 0 = 恢复旧行为): 外壁为圆弧/圆时, 壁面在
@@ -2019,9 +2031,11 @@
       (vla-put-layer arc layer)
       (list arc tp fp))))
 
-;; 把通道线裁到过渡弧切点(v9.22): 保留 keepfrom → 靠外端(out-pt = 定位线
-;; 离外壁远的端点)一侧的段, 删原线返回新线(放 JRT 层)。不依赖画线方向 ——
-;; 旧版保留"距角点远的端点", 定位线反画时把板内段留下(朝内偏移根因)。
+;; 把通道线裁到过渡弧切点: 保留 keepfrom → 靠 out-pt(板边端)一侧的端点,
+;; 删原线返回新线(放 JRT 层)。v9.27: 比较方向修正 —— 旧代码"保留离
+;; out-pt 远的端点", 只在 pw 求交失效(恒得起笔端)时碰巧结果正确, 属双重
+;; 负负得正; pw 修正后必须改为"保留离 out-pt 近的端点"才是注释本意。
+;; (v9.27 起本函数仅为区域分类弃权时的兜底路径)
 (defun dt:jrt2-trim-line (line keepfrom out-pt / s e newobj)
   (setq s (vlax-curve-getstartpoint line)
         e (vlax-curve-getendpoint line)
@@ -2029,20 +2043,44 @@
         e (list (nth 0 e) (nth 1 e) 0.0)
         keepfrom (list (nth 0 keepfrom) (nth 1 keepfrom) 0.0)
         out-pt (list (nth 0 out-pt) (nth 1 out-pt) 0.0))
-  (if (> (distance s out-pt) (distance e out-pt))
+  (if (< (distance s out-pt) (distance e out-pt))
     (setq e s))
   (vla-delete line)
   (setq newobj (vla-addline (dt:ms) (vlax-3d-point keepfrom) (vlax-3d-point e)))
   (vla-put-layer newobj "JRT")
   newobj)
 
+;; v9.27: 直线端点里外分类 —— 返回"落在轮廓围合区域外"的那一端点;
+;; 两端同里/同外/区域不可判 → nil(调用方走旧启发式兜底)
+(defun dt:jrt2-out-end (ln region / a b ia ib)
+  (cond
+    ((or (null ln) (null region)) nil)
+    (T
+     (setq a (vlax-curve-getstartpoint ln)
+           b (vlax-curve-getendpoint ln)
+           ia (dt:jrt2-pt-inside a region)
+           ib (dt:jrt2-pt-inside b region))
+     (cond
+       ((and ia (not ib)) b)
+       ((and ib (not ia)) a)
+       (T nil)))))
+
+;; 用 [p1 p2] 重建直线段(置 JRT 层), 删原线返回新 vla(v9.27 裁剪用)
+(defun dt:jrt2-seg-rebuild (ln p1 p2 / new)
+  (setq new (vla-addline (dt:ms) (vlax-3d-point p1) (vlax-3d-point p2)))
+  (vla-put-layer new "JRT")
+  (vla-delete ln)
+  new)
+
 ;; 单条定位短线 → 在其外壁上开 S 形出线口。返回更新后的 srcs(失败原样)。
 ;; 流程: 通道线 = stub 朝两边偏 halfw → 双端各延 ext(v9.26, 圆弧/圆外壁在
 ;;       偏移处"让开", 短线够不着; ext=jrt2_hook_ext 默认5, 0=旧行为) →
-;;       找两线都穿过的外壁 → 角点/切向 → 过渡弧×2 → 外壁在两切点间开口
-;;       (保留段重建, 原线删) → 通道线裁到切点。
+;;       定位线两端按轮廓围合区域分里外(v9.27) → 找两线都穿过的外壁 →
+;;       角点/切向(d=里→外) → 过渡弧×2 → 外壁在两切点间开口(保留段重建,
+;;       原线删) → 通道线裁到切点(保留切点→板边端, 板内伸出段删除,
+;;       外端延长复原保留)。
 (defun dt:jrt2-hook-one (stub srcs halfw r ext / typ sa ea d ul ch1 ch2 wall
-                            pu pl pw e-out
+                            pu pl pw e-out region s-in s-out oe1 oe2
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
                             p1 p2 nch1 nch2 out)
   (setq typ (vla-get-objectname stub))
@@ -2063,12 +2101,20 @@
        ((< ul 1e-8)
         (princ "\n【通用二】出线口: JRTDW 定位线零长, 跳过。")
         srcs)
-       (T
-         (setq d   (list (/ (nth 0 d) ul) (/ (nth 1 d) ul) 0.0)
-               ch1 (dt:jrt2-line-extend
-                     (dt:jrt2-offset-line stub halfw "JRT") ext "JRT")
-               ch2 (dt:jrt2-line-extend
-                     (dt:jrt2-offset-line stub (- 0.0 halfw) "JRT") ext "JRT"))
+        (T
+          (setq d   (list (/ (nth 0 d) ul) (/ (nth 1 d) ul) 0.0)
+                ch1 (dt:jrt2-line-extend
+                      (dt:jrt2-offset-line stub halfw "JRT") ext "JRT")
+                ch2 (dt:jrt2-line-extend
+                      (dt:jrt2-offset-line stub (- 0.0 halfw) "JRT") ext "JRT"))
+         ;; v9.27: 定位线两端按轮廓围合区域分里外 —— 一头埋板内的长定位线
+         ;; 不再依赖"离交点远=板边"假设; 两端同里/同外 → 保持 nil 走旧启发式
+         (setq region (dt:jrt2-region-edges-n srcs 12) s-in nil s-out nil)
+         (cond
+           ((and (dt:jrt2-pt-inside sa region) (not (dt:jrt2-pt-inside ea region)))
+            (setq s-in sa s-out ea))
+           ((and (dt:jrt2-pt-inside ea region) (not (dt:jrt2-pt-inside sa region)))
+            (setq s-in ea s-out sa)))
         (cond
           ((or (null ch1) (null ch2))
            (foreach o (append (if ch1 (list ch1) nil) (if ch2 (list ch2) nil))
@@ -2104,9 +2150,13 @@
                  (if (< (+ (* (nth 0 (mapcar '- pl pu)) (nth 0 w2))
                            (* (nth 1 (mapcar '- pl pu)) (nth 1 w2))) 0.0)
                    (setq w2 (list (- (nth 0 w2)) (- (nth 1 w2)) 0.0)))
-                 ;; d 取指向板边方向(定位线上远离外壁角点的一端)
-                 (if (< (distance ea pu) (distance sa pu))
-                   (setq d (list (- (nth 0 d)) (- (nth 1 d)) 0.0)))
+                  ;; d 取指向板边方向: v9.27 优先"里端→外端"(轮廓区域分类);
+                  ;; 分类不可用 → 回退 v9.22 "定位线上远离外壁角点的一端"
+                  (if s-out
+                    (setq d (dt:unit (list (- (nth 0 s-out) (nth 0 s-in))
+                                           (- (nth 1 s-out) (nth 1 s-in)) 0.0)))
+                    (if (< (distance ea pu) (distance sa pu))
+                      (setq d (list (- (nth 0 d)) (- (nth 1 d)) 0.0))))
                  (setq r1 (dt:jrt2-hook-arc pu w1 d r "JRT")
                        r2 (dt:jrt2-hook-arc pl w2 d r "JRT"))
                  (cond
@@ -2129,20 +2179,28 @@
                         (foreach o (list arc1 arc2 ch1 ch2) (vla-delete o))
                         (princ "\n【通用二】出线口: 开口区间异常, 该处跳过。")
                         srcs)
-                      (progn
-                        (if (> pa 1e-6)
-                          (setq p1 (dt:rebuild-seg wall 0.0 pa "JRT")))
-                        (if (> (- pe pb) 1e-6)
-                          (setq p2 (dt:rebuild-seg wall pb pe "JRT")))
-                        (vla-delete wall)
-                        ;; v9.22: 通道线只保留靠定位线外端一侧(裁掉侵入分流板内部的段)
-                        (setq pw (dt:jrt2-near-pt
-                                   (dt:jrt2-line-x-curve stub wall) sa)
-                              e-out (if (and pw (< (distance sa pw) (distance ea pw)))
-                                      ea
-                                      sa)
-                              nch1 (dt:jrt2-trim-line ch1 fp1 e-out)
-                              nch2 (dt:jrt2-trim-line ch2 fp2 e-out))
+                       (progn
+                         (if (> pa 1e-6)
+                           (setq p1 (dt:rebuild-seg wall 0.0 pa "JRT")))
+                         (if (> (- pe pb) 1e-6)
+                           (setq p2 (dt:rebuild-seg wall pb pe "JRT")))
+                         ;; v9.27: pw/e-out 必须在删 wall 之前算(v9.22 版放在
+                         ;; 删后, 对已删实体求交恒失败 → e-out 退化成起笔端,
+                         ;; 保留侧随画向翻转); 兜底路径自此真正可用
+                         (setq pw (dt:jrt2-near-pt
+                                    (dt:jrt2-line-x-curve stub wall) sa)
+                               e-out (if (and pw (< (distance sa pw) (distance ea pw)))
+                                       ea
+                                       sa)
+                               oe1 (dt:jrt2-out-end ch1 region)
+                               oe2 (dt:jrt2-out-end ch2 region))
+                         (vla-delete wall)
+                         ;; v9.27: 通道线保留 [切点→板边端] —— 板内伸出段(含
+                         ;; 内端延长)删除, 外端延长复原保留; 分类不可用走旧裁法
+                         (setq nch1 (if oe1 (dt:jrt2-seg-rebuild ch1 fp1 oe1)
+                                      (dt:jrt2-trim-line ch1 fp1 e-out))
+                               nch2 (if oe2 (dt:jrt2-seg-rebuild ch2 fp2 oe2)
+                                      (dt:jrt2-trim-line ch2 fp2 e-out)))
                         (setq out (vl-remove wall srcs))
                         (if p1 (setq out (cons p1 out)))
                         (if p2 (setq out (cons p2 out)))
@@ -2871,7 +2929,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.26 已加载(多模板: 通用一/通用二; 通用二内偏=整环离 FLB 更远者朝内/颈线=FLB 围合区奇偶判外(L形非凸也对)/圆弧壁通道线自动延伸 出线口通道延伸 参数; 与 JRTDW 画向无关)。")
+(princ "\n加热条自动绘制工具 v9.27 已加载(通用二: 长定位线里外按轮廓区域分类, 通道线裁内留外+外端延长保留; 内偏取离 FLB 更远环/颈线 FLB 围合区奇偶判外; 圆弧壁自动延伸参数 jrt2_hook_ext)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线标记出线口即可(方向随意), 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
