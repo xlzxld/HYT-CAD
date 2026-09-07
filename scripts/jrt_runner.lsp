@@ -1,5 +1,9 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.28
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.29
+;;; v9.29  : 通用二通道线外端复原纠正: v9.26 起"外端延长保留"理解反了 ——
+;;;          用户确认 出线端加热条不得高于 JRTDW 定位线。hook_ext 延长仅
+;;;          求交用, 求交后外端一律裁回定位线原始端点(垂足投影
+;;;          vlax-curve-getClosestPointTo, 与区域分类解耦)。其余不动。
 ;;; v9.28  : 通用二出线口过渡弧根治: 旧版把外壁曲线在角点处当"切直线"做
 ;;;          线-线圆角(t=r·cot(α/2)), 壁为弧时切点落在切线上而非弧上
 ;;;          (1714 实测: 圆角心距外壁圆心 41.52≠29+12=41, 肩部缺口 0.65mm
@@ -2175,10 +2179,10 @@
 ;;       偏移处"让开", 短线够不着; ext=jrt2_hook_ext 默认5, 0=旧行为) →
 ;;       定位线两端按轮廓围合区域分里外(v9.27) → 找两线都穿过的外壁 →
 ;;       角点/切向(d=里→外) → 过渡弧×2 → 外壁在两切点间开口(保留段重建,
-;;       原线删) → 通道线裁到切点(保留切点→板边端, 板内伸出段删除,
-;;       外端延长复原保留)。
+;;       原线删) → 通道线保留[过渡弧切点→定位线外端垂足](v9.29: 延长仅
+;;       求交用, 外端裁回定位线端, 不高于 JRTDW)。
 (defun dt:jrt2-hook-one (stub srcs halfw r ext / typ sa ea d ul ch1 ch2 wall
-                            pu pl pw e-out region s-in s-out oe1 oe2
+                            pu pl pw e-out p-out region s-in s-out oe1 oe2
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
                             p1 p2 nch1 nch2 out)
   (setq typ (vla-get-objectname stub))
@@ -2290,11 +2294,15 @@
                                e-out (if (and pw (< (distance sa pw) (distance ea pw)))
                                        ea
                                        sa)
-                               oe1 (dt:jrt2-out-end ch1 region)
-                               oe2 (dt:jrt2-out-end ch2 region))
+                               ;; v9.29: 外端复原 = 通道线裁回定位线原始外端
+                               ;; (hook_ext 延长仅求交用, 用完即裁回);
+                               ;; 垂足投影, 与区域分类解耦
+                               p-out (if s-out s-out e-out)
+                               oe1 (vlax-curve-getClosestPointTo ch1 p-out)
+                               oe2 (vlax-curve-getClosestPointTo ch2 p-out))
                          (vla-delete wall)
-                         ;; v9.27: 通道线保留 [切点→板边端] —— 板内伸出段(含
-                         ;; 内端延长)删除, 外端延长复原保留; 分类不可用走旧裁法
+                         ;; v9.29: 通道线保留 [过渡弧切点 → 定位线外端] ——
+                         ;; 板内伸出段删除, 外端不留延长(高于定位线即错)
                          (setq nch1 (if oe1 (dt:jrt2-seg-rebuild ch1 fp1 oe1)
                                       (dt:jrt2-trim-line ch1 fp1 e-out))
                                nch2 (if oe2 (dt:jrt2-seg-rebuild ch2 fp2 oe2)
@@ -3027,7 +3035,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.28 已加载(通用二: 出线口过渡弧按外壁曲线解析真切, 根治肩部缺口/内偏断链/封口斜线; 通道线裁内留外+外端延长保留; 内偏取离 FLB 更远环/颈线 FLB 围合区奇偶判外)。")
+(princ "\n加热条自动绘制工具 v9.29 已加载(通用二: 通道线外端裁回定位线端, 出线端不高于 JRTDW; 过渡弧按外壁曲线解析真切; 内偏取离 FLB 更远环/颈线奇偶判外)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线标记出线口即可(方向随意), 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
