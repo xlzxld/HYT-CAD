@@ -1,5 +1,17 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.27
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.28
+;;; v9.28  : 通用二出线口过渡弧根治: 旧版把外壁曲线在角点处当"切直线"做
+;;;          线-线圆角(t=r·cot(α/2)), 壁为弧时切点落在切线上而非弧上
+;;;          (1714 实测: 圆角心距外壁圆心 41.52≠29+12=41, 肩部缺口 0.65mm
+;;;          → 内偏 4/8 放大为 1.33/1.78mm → 环链断(传播阈 0.5) → 破口封
+;;;          口"外端↔最内端"误配出 4 条 X 斜线+肩部错台, 用户判一塌糊涂)。
+;;;          现按角点密切圆(一阶/二阶导求 Rw/Cw)解析求真切圆角: 圆角心
+;;;          =p+t·d+r·m, 解 |c-Cw|=Rw+r(外切)/Rw-r(内切)一元二次, 壁剪在
+;;;          真切点 tp、通道裁在 fp=p+t·d, 三段端点严格重合且 G1 相切
+;;;          (新增 dt:jrt2-osculating / dt:jrt2-true-fillet, hook-arc 增
+;;;          wall 参); 直壁(曲率≈0)/求解失败回退线-线公式, 行为不劣于旧版。
+;;;          封口/内偏/颈线规则不动。新增回归: tools/check_jrt2_out.py +
+;;;          tools/1714_base.dxf(修复前必红/修复后必绿)。
 ;;; v9.27  : 用户六图手工流程定稿(图2→图3 的裁剪/复原步):
 ;;;          ①硬 bug: v9.22 的 pw=stub×wall 求交写在 (vla-delete wall) 之后,
 ;;;            对已删实体求交恒失败 → e-out 退化成"起笔端", 通道线保留侧
@@ -1998,11 +2010,89 @@
     (if (< dd bd) (setq bd dd best p)))
   best)
 
-;; 过渡弧(两相交直线在角点 p 的圆角, 解析法): w = 沿外壁远离开口的单位向量,
-;; d = 沿定位线指向板边的单位向量。切点距 t = r/tan(α/2)(直角时 t=r),
+;; v9.28: 曲线在点 p 处的密切圆 —— 返回 (半径 圆心) 或 nil(直壁/求值失败)。
+;; 曲率半径 Rw = |f'|^3 / |f'×f''|, 圆心在曲线转弯一侧(cross>0 取左法向)。
+;; getparamatpoint 对浮点偏移点可能返 nil(坑#86 同源), 一律 catch 后判空;
+;; 曲率≈0(直壁)→ nil, 调用方走线-线公式。
+(defun dt:jrt2-osculating (curve p / par f1 f2 cr ul rw nx ny)
+  (setq par (vl-catch-all-apply 'vlax-curve-getparamatpoint (list curve p)))
+  (if (and par (not (vl-catch-all-error-p par)) (numberp par))
+    (progn
+      (setq f1 (vl-catch-all-apply 'vlax-curve-getfirstderiv (list curve par))
+            f2 (vl-catch-all-apply 'vlax-curve-getsecondderiv (list curve par)))
+      (if (and f1 f2
+               (not (vl-catch-all-error-p f1))
+               (not (vl-catch-all-error-p f2)))
+        (progn
+          (setq ul (sqrt (+ (* (nth 0 f1) (nth 0 f1)) (* (nth 1 f1) (nth 1 f1))))
+                cr (- (* (nth 0 f1) (nth 1 f2)) (* (nth 1 f1) (nth 0 f2))))
+          (if (and (> ul 1e-12) (> (abs cr) 1e-9))
+            (progn
+              (setq rw (/ (* ul ul ul) (abs cr))
+                    nx (if (> cr 0.0) (- (/ (nth 1 f1) ul)) (/ (nth 1 f1) ul))
+                    ny (if (> cr 0.0) (/ (nth 0 f1) ul) (- (/ (nth 0 f1) ul))))
+              (list rw (list (+ (nth 0 p) (* rw nx))
+                             (+ (nth 1 p) (* rw ny)) 0.0)))))))))
+
+;; v9.28: 外壁密切圆(osc=(Rw Cw))与通道线的解析真切圆角。
+;; 圆角心 c = p + t·d + r·m (m = d 的法向且 dot(m,w)>0, 保证心在保留壁侧),
+;; 解 |c-Cw| = Rw+r (外切, 凸壁 S 弯肩部) / Rw-r (内切, 凹壁) 的一元二次,
+;; 取满足 t>0(切点在靠板边侧) 且 切壁点 tp=Cw+Rw·unit(c-Cw) 落在保留壁侧
+;; (dot(tp-p,w)>0) 的根。返回 (tp fp c) 或 nil(无有效解, 调用方回退线-线)。
+(defun dt:jrt2-true-fillet (p w d r osc / rw cw m qx qy bx cx rr disc rt t1 t2
+                               tt c ux uy dl tp fp res)
+  (if osc
+    (progn
+      (setq rw (car osc)
+            cw (cadr osc)
+            m  (list (- (nth 1 d)) (nth 0 d) 0.0))
+      (if (< (+ (* (nth 0 m) (nth 0 w)) (* (nth 1 m) (nth 1 w))) 0.0)
+        (setq m (list (- (nth 0 m)) (- (nth 1 m)) 0.0)))
+      (setq qx (+ (- (nth 0 p) (nth 0 cw)) (* r (nth 0 m)))
+            qy (+ (- (nth 1 p) (nth 1 cw)) (* r (nth 1 m)))
+            bx (* 2.0 (+ (* (nth 0 d) qx) (* (nth 1 d) qy))))
+      ;; 依次试外切/内切半径, 各取两根, 首个通过校验者胜
+      (foreach rr (append (list (+ rw r))
+                          (if (> (- rw r) 1e-9) (list (- rw r)) nil))
+        (if (null res)
+          (progn
+            (setq cx   (- (+ (* qx qx) (* qy qy)) (* rr rr))
+                  disc (- (* bx bx) (* 4.0 cx)))
+            (if (>= disc 0.0)
+              (progn
+                (setq rt (sqrt disc)
+                      t1 (/ (- (- 0.0 bx) rt) 2.0)
+                      t2 (/ (- rt bx) 2.0))
+                (foreach tt (list t1 t2)
+                  (if (and (null res) (> tt 1e-9))
+                    (progn
+                      (setq c  (list (+ (nth 0 p) (* tt (nth 0 d)) (* r (nth 0 m)))
+                                     (+ (nth 1 p) (* tt (nth 1 d)) (* r (nth 1 m)))
+                                     0.0)
+                            ux (- (nth 0 c) (nth 0 cw))
+                            uy (- (nth 1 c) (nth 1 cw))
+                            dl (sqrt (+ (* ux ux) (* uy uy))))
+                      (if (> dl 1e-9)
+                        (progn
+                          (setq tp (list (+ (nth 0 cw) (* rw (/ ux dl)))
+                                         (+ (nth 1 cw) (* rw (/ uy dl)))
+                                         0.0)
+                                fp (list (+ (nth 0 p) (* tt (nth 0 d)))
+                                         (+ (nth 1 p) (* tt (nth 1 d)))
+                                         0.0))
+                          (if (> (+ (* (- (nth 0 tp) (nth 0 p)) (nth 0 w))
+                                    (* (- (nth 1 tp) (nth 1 p)) (nth 1 w)))
+                                 1e-9)
+                            (setq res (list tp fp c)))))))))))))
+      res)))
+
+;; 过渡弧(外壁曲线与通道线在角点 p 的圆角, 解析法): w = 沿外壁远离开口的
+;; 单位向量, d = 沿通道线指向板边的单位向量。v9.28: 壁为曲线时按其角点
+;; 密切圆解析求真切(切点落在壁上而非切线上, 三段端点严格重合且 G1);
+;; 直壁(曲率≈0)或求解失败回退线-线公式: 切点距 t = r/tan(α/2)(直角即 r),
 ;; 切点 T = p + t·w(壁上) / F = p + t·d(通道线上), 弧心 = T + n·r
 ;; (n = w 的垂直方向上指向 d 一侧)。返回 (弧 T F) 或 nil(两线近平行)。
-(defun dt:jrt2-hook-arc (p w d r layer / ms dot n nl t-len tp fp c
+(defun dt:jrt2-hook-arc (p w d r layer wall / ms dot n nl osc best t-len tp fp c
                             a1 a2 sw tmp arc)
   (setq dot (+ (* (nth 0 d) (nth 0 w)) (* (nth 1 d) (nth 1 w))))
   (if (> (abs dot) 0.9999)
@@ -2013,15 +2103,23 @@
             n  (list (/ (nth 0 n) nl) (/ (nth 1 n) nl) 0.0))
       (if (< (+ (* (nth 0 d) (nth 0 n)) (* (nth 1 d) (nth 1 n))) 0.0)
         (setq n (list (- (nth 0 n)) (- (nth 1 n)) 0.0)))
-      (setq t-len (/ (* r (+ 1.0 dot))
-                     (sqrt (- 1.0 (* dot dot))))
-            tp (list (+ (nth 0 p) (* t-len (nth 0 w)))
-                     (+ (nth 1 p) (* t-len (nth 1 w))) 0.0)
-            fp (list (+ (nth 0 p) (* t-len (nth 0 d)))
-                     (+ (nth 1 p) (* t-len (nth 1 d))) 0.0)
-            c  (list (+ (nth 0 tp) (* r (nth 0 n)))
-                     (+ (nth 1 tp) (* r (nth 1 n))) 0.0)
-            a1 (angle '(0.0 0.0 0.0) (mapcar '- tp c))
+      ;; v9.28: 曲线壁按密切圆求真切圆角; 直壁/失败回退线-线公式
+      (setq osc  (if wall (dt:jrt2-osculating wall p))
+            best (if osc (dt:jrt2-true-fillet p w d r osc)))
+      (if best
+        (setq tp (car best) fp (cadr best) c (caddr best))
+        (progn
+          (if osc
+            (princ "\n【通用二】出线口: 过渡弧真切求解失败, 该切点按切线近似处理。"))
+          (setq t-len (/ (* r (+ 1.0 dot))
+                         (sqrt (- 1.0 (* dot dot))))
+                tp (list (+ (nth 0 p) (* t-len (nth 0 w)))
+                         (+ (nth 1 p) (* t-len (nth 1 w))) 0.0)
+                fp (list (+ (nth 0 p) (* t-len (nth 0 d)))
+                         (+ (nth 1 p) (* t-len (nth 1 d))) 0.0)
+                c  (list (+ (nth 0 tp) (* r (nth 0 n)))
+                         (+ (nth 1 tp) (* r (nth 1 n))) 0.0))))
+      (setq a1 (angle '(0.0 0.0 0.0) (mapcar '- tp c))
             a2 (angle '(0.0 0.0 0.0) (mapcar '- fp c))
             sw (- a2 a1))
       (if (< sw 0.0) (setq sw (+ sw (* 2.0 pi))))
@@ -2157,8 +2255,8 @@
                                            (- (nth 1 s-out) (nth 1 s-in)) 0.0)))
                     (if (< (distance ea pu) (distance sa pu))
                       (setq d (list (- (nth 0 d)) (- (nth 1 d)) 0.0))))
-                 (setq r1 (dt:jrt2-hook-arc pu w1 d r "JRT")
-                       r2 (dt:jrt2-hook-arc pl w2 d r "JRT"))
+                 (setq r1 (dt:jrt2-hook-arc pu w1 d r "JRT" wall)
+                       r2 (dt:jrt2-hook-arc pl w2 d r "JRT" wall))
                  (cond
                    ((or (null r1) (null r2))
                     (foreach o (append (if r1 (list (car r1)) nil)
@@ -2929,7 +3027,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.27 已加载(通用二: 长定位线里外按轮廓区域分类, 通道线裁内留外+外端延长保留; 内偏取离 FLB 更远环/颈线 FLB 围合区奇偶判外; 圆弧壁自动延伸参数 jrt2_hook_ext)。")
+(princ "\n加热条自动绘制工具 v9.28 已加载(通用二: 出线口过渡弧按外壁曲线解析真切, 根治肩部缺口/内偏断链/封口斜线; 通道线裁内留外+外端延长保留; 内偏取离 FLB 更远环/颈线 FLB 围合区奇偶判外)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线标记出线口即可(方向随意), 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
