@@ -1,5 +1,18 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.25
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.26
+;;; v9.26  : 用户三轮实测修复:
+;;;          ①新增参数 jrt2_hook_ext(出线口通道延伸, 默认 5.0, 进参数框/
+;;;            ini/记忆; 填 0 = 恢复旧行为): 外壁为圆弧/圆时, 壁面在
+;;;            ±half_w 偏移处"让开", 通道线短线段够不着外壁 → 整个开口
+;;;            被跳过(实测日志"通道线未与外壁相交")。现 ch1/ch2 生成后
+;;;            双端各延 ext 再走找壁/过渡弧/裁剪全链路(延伸后的线即持久
+;;;            产物, 外端压进颈线走廊);
+;;;          ②颈线反向二次根治: 包围盒中心判据只对凸形 FLB 可靠, L 形/
+;;;            带台阶外框的凹区会翻错方向(用户实测"某些情况仍入侵 FLB")。
+;;;            主判据改为 FLB 围合区域奇偶点内判定(新增 dt:jrt2-region-
+;;;            edges-n, 颈线按 24 段/曲线采样——R≤400 弧弦割误差 <5mm 探
+;;;            针, 12 段版会吞弧中段致漏判), 判据不可得时才回退包围盒
+;;;            中心, 再回退保持原向。
 ;;; v9.25  : 用户实测修复(崩溃 + 方向判据换用户方案):
 ;;;          ①根治 "参数类型错误: numberp: nil"(v9.24 引入): vlax-curve 的
 ;;;            getpointatparam/getdistatparam 越界会返回 nil 而不抛错
@@ -219,7 +232,8 @@
         (list "jrt2_close_r"    '*jrt2-close-r*    15.0) ; 出线封口圆角R(通用二)
         (list "jrt2_trim_r"     '*jrt2-trim-r*     15.0) ; 出线相交圆角R(通用二)
         (list "jrt2_half_w"     '*jrt2-half-w*     16.5) ; 单线补边: 壁线距定位线半宽(通用二)
-        (list "jrt2_end_r"      '*jrt2-end-r*      12.0))) ; 单线补边: 端部喇叭R(通用二)
+        (list "jrt2_end_r"      '*jrt2-end-r*      12.0) ; 单线补边: 端部喇叭R(通用二)
+        (list "jrt2_hook_ext"   '*jrt2-hook-ext*    5.0))) ; 出线口通道延伸: 通道线双端加长量, 0=旧行为(通用二)
 (foreach p dt:jrt-param-table (set (cadr p) (caddr p)))
 
 ;; ============================================================================
@@ -399,8 +413,8 @@
                 ("jrt_cap_r" . 29.0) ("jrt_inner_step" . 4.0) ("jrt_inner_count" . 2.0))
               nil)
         (list "通用二"
-              "JRT外壁整圈+JRTDW标记出线口→内偏恒朝轮廓内侧(几何判定,与JRTDW画向无关); 颈线恒朝FLB外侧不入侵"
-              '(("jrt2_half_w" . 16.5) ("jrt2_end_r" . 12.0)
+              "JRT外壁整圈+JRTDW标记出线口→内偏恒朝轮廓内侧(几何判定,与JRTDW画向无关); 颈线恒朝FLB外侧不入侵; 圆弧壁通道线自动延伸"
+              '(("jrt2_half_w" . 16.5) ("jrt2_end_r" . 12.0) ("jrt2_hook_ext" . 5.0)
                 ("jrt_inner_step" . 4.0) ("jrt_inner_count" . 2.0)
                 ("jrt2_neck_len" . 65.0) ("jrt2_neck_off" . 35.0)
                 ("jrt2_close_r" . 15.0) ("jrt2_trim_r" . 15.0))
@@ -1541,12 +1555,14 @@
        (setq k (1+ k)))
      out)))
 
-;; 轮廓条 → 闭合区域边集: 各段采样边 + 自由端头贪心最近配对封口(出线口
-;; 打开处/未合拢处按最短距离两两连线, 与 dt:jrt2-close 的配对思路一致)
-(defun dt:jrt2-region-edges (bar / obj edges ends s1 s2 d best)
+;; 轮廓条(指定采样段数)→ 闭合区域边集: 各段采样边 + 自由端头贪心最近配对
+;; 封口(出线口打开处/未合拢处按最短距离两两连线, 与 dt:jrt2-close 的配对
+;; 思路一致)。v9.26: n 可调 —— 大半径弧在 n=12 时弦割线内缩可达 13.6mm,
+;; 会吞掉 5mm 探针致奇偶漏判; 颈线方向判定用 n=24(R≤400 误差 ≈3.4mm)
+(defun dt:jrt2-region-edges-n (bar n / obj edges ends s1 s2 d best)
   (setq edges nil)
   (foreach obj bar
-    (setq edges (append (dt:jrt2-curve-edges obj 12) edges)))
+    (setq edges (append (dt:jrt2-curve-edges obj n) edges)))
   (setq ends (mapcar 'car (dt:jrt2-free-ends bar 0.5)))
   (while (> (length ends) 1)
     (setq s1 (car ends) best nil d 1e99)
@@ -1555,6 +1571,10 @@
     (setq edges (cons (list s1 best) edges)
           ends (vl-remove s1 (vl-remove best ends))))
   edges)
+
+;; 默认 12 段采样版(嵌套内偏围合判定用; 颈线方向判定用 -n 24)
+(defun dt:jrt2-region-edges (bar / )
+  (dt:jrt2-region-edges-n bar 12))
 
 ;; 点在围合区域内?(+X 射线交点计数, 奇=内; edges=nil → 不可判定返回 nil)
 ;; v9.25: 防御性跳过含非点端点的边(理论上 curve-edges 已滤净, 双保险)
@@ -1840,15 +1860,18 @@
 ;;   1) JRT 层源线检查 + JRTDW 定位层检查(缺则中止)
 ;;   2) 按句柄记忆删除上一轮产物(只删仍在 JRT 层的; 源线永不删)
 ;;   3) 源线过滤(可偏移类型, 跳过零长线头)并按端点相接组成"条"
-;;   4) 每条第 k 层(k=1..内向偏移次数)每段朝轮廓围合区域内侧偏 k×步长
-;;      (v9.24: 几何判定, 与 JRTDW 画向无关; 歧义才回退 JRTDW 就近)
+;;   4) 每条第 k 层(k=1..内向偏移次数)每段朝内侧偏 k×步长
+;;      (v9.25: 锚段两候选各整环传播, 取离 FLB 壁更远的环=朝内;
+;;       FLB 不可测→围合区域奇偶→JRTDW 就近逐级回退, 与 JRTDW 画向无关)
 ;;   5) 每条收集全部自由端头(带层号)→ 每个头一条线连最外<->最内
 ;;   6) 记忆本轮产物句柄 + 统计输出
 ;; ---------------------------------------------------------------------------
 ;; 单线自动补边(v9.16, 按用户截图定稿): 用户只画 ①外壁整圈(JRT 层, 闭合轮廓;
 ;; 请用直线/圆弧/开放多段线, 勿用闭合多段线) ②JRTDW 定位短线(每处出线口一条,
 ;; 贴着外壁指向板边)。脚本自动完成旧手工三步:
-;;   偏移 = JRTDW 朝两边偏 jrt2_half_w → 出线通道两壁线(JRT 层, 持久源线);
+;;   偏移 = JRTDW 朝两边偏 jrt2_half_w → 出线通道两壁线(JRT 层, 持久源线;
+;;          v9.26 双端再各延 jrt2_hook_ext(默认5) —— 圆弧/圆外壁在偏移处
+;;          "让开", 不延伸则通道线够不着外壁致开口被跳过; 0=旧行为);
 ;;   裁剪 = 外壁在通道处开口(切口到过渡弧切点为止, 中间段删除);
 ;;   圆角 = 外壁断头<->通道线过渡弧 jrt2_end_r(任意夹角按 r/tan(α/2) 解析,
 ;;          直角即 R12, 与手画 FILLET 一致)。
@@ -1866,6 +1889,32 @@
       (setq v (car (vlax-safearray->list (vlax-variant-value r))))
       (vla-put-layer v layer)
       v)))
+
+;; 直线双端各延长 ext(v9.26, 出线口通道延伸用): 仅 AcDbLine 生效,
+;; 重建新线置 layer 后删原线返回新 vla; ln=nil/ext<=0/非直线/零长 → 原样返回
+(defun dt:jrt2-line-extend (ln ext layer / sp ep d dl nx new)
+  (if (or (null ln) (null ext) (<= ext 0.0)
+          (/= (vla-get-objectname ln) "AcDbLine"))
+    ln
+    (progn
+      (setq sp (vlax-curve-getstartpoint ln)
+            ep (vlax-curve-getendpoint ln)
+            d  (list (- (nth 0 ep) (nth 0 sp)) (- (nth 1 ep) (nth 1 sp)) 0.0)
+            dl (sqrt (+ (* (nth 0 d) (nth 0 d)) (* (nth 1 d) (nth 1 d)))))
+      (if (< dl 1e-8)
+        ln
+        (progn
+          (setq nx  (list (/ (nth 0 d) dl) (/ (nth 1 d) dl) 0.0)
+                new (vla-addline (dt:ms)
+                       (vlax-3d-point
+                         (list (- (nth 0 sp) (* (nth 0 nx) ext))
+                               (- (nth 1 sp) (* (nth 1 nx) ext)) 0.0))
+                       (vlax-3d-point
+                         (list (+ (nth 0 ep) (* (nth 0 nx) ext))
+                               (+ (nth 1 ep) (* (nth 1 nx) ext)) 0.0))))
+          (vla-put-layer new layer)
+          (vla-delete ln)
+          new)))))
 
 ;; 重跑幂等检查: 该定位短线处是否已有通道壁线 —— 源线中存在与 stub 平行
 ;; (|叉积|<1e-4)、垂直距 ≈ halfw(±0.5)的直线即视为已开过
@@ -1989,9 +2038,12 @@
   newobj)
 
 ;; 单条定位短线 → 在其外壁上开 S 形出线口。返回更新后的 srcs(失败原样)。
-;; 流程: 通道线 = stub 朝两边偏 halfw → 找两线都穿过的外壁 → 角点/切向 →
-;;       过渡弧×2 → 外壁在两切点间开口(保留段重建, 原线删) → 通道线裁到切点。
-(defun dt:jrt2-hook-one (stub srcs halfw r / typ sa ea d ul ch1 ch2 wall pu pl pw e-out
+;; 流程: 通道线 = stub 朝两边偏 halfw → 双端各延 ext(v9.26, 圆弧/圆外壁在
+;;       偏移处"让开", 短线够不着; ext=jrt2_hook_ext 默认5, 0=旧行为) →
+;;       找两线都穿过的外壁 → 角点/切向 → 过渡弧×2 → 外壁在两切点间开口
+;;       (保留段重建, 原线删) → 通道线裁到切点。
+(defun dt:jrt2-hook-one (stub srcs halfw r ext / typ sa ea d ul ch1 ch2 wall
+                            pu pl pw e-out
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
                             p1 p2 nch1 nch2 out)
   (setq typ (vla-get-objectname stub))
@@ -2013,9 +2065,11 @@
         (princ "\n【通用二】出线口: JRTDW 定位线零长, 跳过。")
         srcs)
        (T
-        (setq d   (list (/ (nth 0 d) ul) (/ (nth 1 d) ul) 0.0)
-              ch1 (dt:jrt2-offset-line stub halfw "JRT")
-              ch2 (dt:jrt2-offset-line stub (- 0.0 halfw) "JRT"))
+         (setq d   (list (/ (nth 0 d) ul) (/ (nth 1 d) ul) 0.0)
+               ch1 (dt:jrt2-line-extend
+                     (dt:jrt2-offset-line stub halfw "JRT") ext "JRT")
+               ch2 (dt:jrt2-line-extend
+                     (dt:jrt2-offset-line stub (- 0.0 halfw) "JRT") ext "JRT"))
         (cond
           ((or (null ch1) (null ch2))
            (foreach o (append (if ch1 (list ch1) nil) (if ch2 (list ch2) nil))
@@ -2031,10 +2085,10 @@
                        pl (dt:jrt2-near-pt (dt:jrt2-line-x-curve s ch2) sa))
                  (if (and pu pl) (setq wall s) (setq pu nil pl nil)))))
            (cond
-             ((null wall)
-              (foreach o (list ch1 ch2) (vla-delete o))
-              (princ "\n【通用二】出线口: 通道线未与外壁相交(定位线未贴外壁或该处已开口), 跳过。")
-              srcs)
+              ((null wall)
+               (foreach o (list ch1 ch2) (vla-delete o))
+               (princ "\n【通用二】出线口: 通道线未与外壁相交(定位线未贴外壁/该处已开口/延伸不足, 可加大 出线口通道延伸), 跳过。")
+               srcs)
              (T
               (setq w1 (dt:jrt2-wall-tan wall pu)
                     w2 (dt:jrt2-wall-tan wall pl))
@@ -2103,7 +2157,8 @@
 ;; 返回更新后的 srcs(生成件/切口段均为持久源线)。
 (defun dt:jrt2-hooks (srcs dw-vlas / stub)
   (foreach stub dw-vlas
-    (setq srcs (dt:jrt2-hook-one stub srcs *jrt2-half-w* *jrt2-end-r*)))
+    (setq srcs (dt:jrt2-hook-one stub srcs *jrt2-half-w* *jrt2-end-r*
+                                 *jrt2-hook-ext*)))
   srcs)
 
 (defun dt:jrt2-process ( / doc layers srcs bars dw-all dw-vlas bar-made made ents
@@ -2330,10 +2385,12 @@
 ;; 两角 R=jrt2-close-r 圆角; 两壁与原 JT 线相交处:
 ;; 裁掉走廊带内(距 JRTDW 轴线<neck-off)的原 JT 线段与壁伸入 JT 区域的
 ;; 多余段, 相交处 R=jrt2-trim-r 圆角(弧向随保留段, 与 JRT 出线处一致)。
-;; v9.24: 颈线方向 = FLB 包围盒中心外侧(沿 JRTDW 走出若靠近中心则反向),
-;;        FLBJT 恒朝外、不入侵 FLB, 与 JRTDW 画向无关。
+;; v9.24: 颈线方向 = FLB 外侧, FLBJT 恒朝外、不入侵 FLB, 与 JRTDW 画向无关。
+;; v9.26: 方向主判据升级为 FLB 围合区域奇偶点内(对 L 形/带台阶非凸外框
+;;        同样正确, 修复"某些情况仍入侵 FLB"); 判据不可得时才回退 v9.24
+;;        包围盒中心规则。FLB 曲线按 24 段/曲线采样(R≤400 弦割误差<探针5)。
 ;; 返回本功能新建对象 vla 列表
-(defun dt:jrt2-neck (dw-vlas / out flb flb-bb flb-cen jt-snap dwc p-s p-e pint pt f2
+(defun dt:jrt2-neck (dw-vlas / out flb flb-edges flb-bb flb-cen jt-snap dwc p-s p-e pint pt f2
                           cp xpts far dirv r clen walls w ws we wf wends cl arc
                           e2 cutc wall-x pt-x fresh out-e pc partner rr p sgn wx)
   (setq out nil)
@@ -2341,9 +2398,8 @@
   (if (null flb)
     (princ "\n【提示】图层 \"FLB\" 不存在, 跳过出线口绘制。")
     (progn
-      ;; v9.24: FLB 包围盒中心(颈线内外方向判据 —— FLB 为分流板外框, 近似
-      ;;        凸, 交点朝中心=板内, 背离中心=板外; 取不到包围盒时判据不可
-      ;;        用, 自动回退 v9.10 "沿 JRTDW 指向远端" 旧规则)
+      ;; v9.26: 主判据 FLB 围合区域边集(24 段采样); 兜底包围盒中心
+      (setq flb-edges (dt:jrt2-region-edges-n (dt:curves-only flb) 24))
       (setq flb-bb (dt:rect-bbox (dt:curves-only flb))
             flb-cen (if flb-bb
                       (list (/ (+ (car flb-bb) (caddr flb-bb)) 2.0)
@@ -2378,12 +2434,15 @@
             (setq far (if (< (distance pint p-s) (distance pint p-e))
                         p-e p-s)
                   dirv (dt:unit (mapcar '- far pint))
-                  ;; v9.24: 颈线方向恒朝 FLB 外侧 —— 交点沿 dirv 走 5mm 若比
-                  ;;        交点更靠近 FLB 中心(即 JRTDW 画成了从板边指向板内)
-                  ;;        → 反向; FLB 中心不可得时保持原向(v9.10 旧行为)
-                  dirv (if (and flb-cen
-                                (< (distance (dt:pt+vec pint dirv 5.0) flb-cen)
-                                   (distance pint flb-cen)))
+                  ;; v9.26: 颈线方向恒朝 FLB 外侧 —— 主判据: 交点沿 dirv 走
+                  ;;        5mm 若落在 FLB 围合区域内(奇偶判定, 非凸也对)
+                  ;;        → 反向; 围合边集不可得时回退 v9.24 包围盒中心
+                  ;;        距离判据; 两者都不可用 → 保持原向(v9.10 旧行为)
+                  dirv (if (if flb-edges
+                             (dt:jrt2-pt-inside (dt:pt+vec pint dirv 5.0) flb-edges)
+                             (and flb-cen
+                                  (< (distance (dt:pt+vec pint dirv 5.0) flb-cen)
+                                     (distance pint flb-cen))))
                          (list (- (car dirv)) (- (cadr dirv)) 0.0)
                          dirv))
             ;; 1) 颈线(构图线, JT 层): 偏移出两壁后即删除不保留
@@ -2500,7 +2559,8 @@
         ("jrt2_close_r"    . "出线封口圆角R:")
         ("jrt2_trim_r"     . "出线相交圆角R:")
         ("jrt2_half_w"     . "出线口通道半宽:")
-        ("jrt2_end_r"      . "出线口过渡圆角R:")))
+        ("jrt2_end_r"      . "出线口过渡圆角R:")
+        ("jrt2_hook_ext"   . "出线口通道延伸:")))
 
 ;; 当前模板用到的参数键列表(= 模板参数默认表的键序; v9.9 起参数框动态化)
 (defun dt:jrt-tpl-keys ( / )
@@ -2812,7 +2872,7 @@
 ;; v9.20: 移除 v9.19 的加载自检 —— atoms-family 在部分环境不返回函数符号
 ;; (实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报"缺失"), 检测不可靠(坑 #72);
 ;; 半加载若真发生, 运行时的 no function definition 报错本身即准确诊断。
-(princ "\n加热条自动绘制工具 v9.25 已加载(多模板: 通用一/通用二; 通用二内偏=整环离 FLB 更远者朝内/颈线恒朝 FLB 外侧, 与 JRTDW 画向无关; 参数默认值外置 jrt_runner.ini 可记事本修改, 上次值自动记忆)。")
+(princ "\n加热条自动绘制工具 v9.26 已加载(多模板: 通用一/通用二; 通用二内偏=整环离 FLB 更远者朝内/颈线=FLB 围合区奇偶判外(L形非凸也对)/圆弧壁通道线自动延伸 出线口通道延伸 参数; 与 JRTDW 画向无关)。")
 (princ "\n用法1: 输入 JRT → 先选模板再确认参数后执行(通用一需 OFF 的 RZ; 通用二画外壁整圈 + JRTDW 定位短线标记出线口即可(方向随意), 出线口自动开出; 需 FLB)。")
 (princ "\n用法2: 输入 JRTPARAM 弹出参数设置对话框(只改参数不执行)。")
 (princ)
