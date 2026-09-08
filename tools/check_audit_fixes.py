@@ -22,6 +22,13 @@ def load(name):
         return f.read()
 
 
+def code_of(name):
+    """去注释代码视图(与 check_lisp.py 口径一致) —— 断言只看代码,
+    不被版本账注释里引用的旧写法字样误命中。"""
+    return '\n'.join(re.sub(r';.*$', '', l)
+                     for l in load(name).splitlines())
+
+
 def check(cid, desc, fn):
     try:
         ok, evidence = fn()
@@ -114,6 +121,89 @@ def a03():
 
 
 check('A-03', 'flb 包络法假体包络盒剔除文字标注', a03)
+
+
+# ---------------------------------------------------------------------------
+# B-01 wx 精雕保色查错文档: dt:sz-flatten-layer 第一实参传 tgt-doc, 但实体
+# 此刻还是 cur-doc 的临时克隆(CopyObjects 在其后才发生) → ByLayer 实体查到
+# 目标图 ensure 过的固定层色, 原色保留落空。断言: 两处调用均传 cur-doc。
+# ---------------------------------------------------------------------------
+def b01():
+    src = code_of('wx_runner.lsp')
+    n_cur = len(re.findall(r'dt:sz-flatten-layer cur-doc', src))
+    n_tgt = len(re.findall(r'dt:sz-flatten-layer tgt-doc', src))
+    return n_cur >= 2 and n_tgt == 0, \
+        'flatten-layer 调用 cur-doc=%d(需>=2), 残留 tgt-doc=%d(需0)' % (n_cur, n_tgt)
+
+
+check('B-01', 'wx 精雕 JD 保色 flatten 实参改 cur-doc', b01)
+
+# ---------------------------------------------------------------------------
+# B-02 wx 硬编码本机路径: ini 未配置 root 时的兜底写死 C:\Users\5600\...,
+# 换机即往错误位置建目录。断言: wx_runner.lsp 不再出现硬编码用户目录。
+# ---------------------------------------------------------------------------
+B02 = re.compile(r'C:\\\\Users\\\\')
+
+
+def b02():
+    src = code_of('wx_runner.lsp')
+    n = len(B02.findall(src))
+    return n == 0, '仍有 %d 处 C:\\\\Users\\\\ 硬编码' % n
+
+
+check('B-02', 'wx 兜底根目录改 USERPROFILE 推导', b02)
+
+# ---------------------------------------------------------------------------
+# B-05/B-06 死代码: 定义后全库零引用(体检时 grep 取证)。
+# ---------------------------------------------------------------------------
+def dead_symbols():
+    src = code_of('wx_runner.lsp')
+    problems = []
+    if '*dt-outsource-target-dwg*' in src:
+        problems.append('wx 仍有死全局 *dt-outsource-target-dwg*')
+    if 'dt:sz-norm-ang' in src:
+        problems.append('wx 仍有死函数 dt:sz-norm-ang')
+    return not problems, ('; '.join(problems) if problems else '两个死符号均已清除')
+
+
+check('B-05/B-06', 'wx 死全局/死函数清除', dead_symbols)
+
+# ---------------------------------------------------------------------------
+# B-11 wx FLBSZ 撤销组兜底 + SJTZ API 混用: FLBSZ 的 *error* 只打印不闭合
+# 包络框 UNDO 组(command BE); SJTZ 以 (command "_.UNDO" "E") 闭合
+# vla-startundomark 开的组(与坑#69 全 COM 化相悖)。
+# 断言: FLBSZ 有 undo-started 兜底; wx 中 "_.UNDO" "E" 仅剩 BE/E 配对 1 处。
+# ---------------------------------------------------------------------------
+def b11():
+    src = code_of('wx_runner.lsp')
+    m = re.search(r'\(defun c:FLBSZ\b.*?\n\(defun c:FLBSIZE', src, re.S)
+    if not m:
+        return False, '未定位到 c:FLBSZ 函数块'
+    if 'undo-started' not in m.group(0):
+        return False, 'c:FLBSZ 缺 undo-started 兜底'
+    n_e = len(re.findall(r'"\_\.UNDO" "E"', src))
+    return n_e == 1, '残留 (command "_.UNDO" "E") 应为1处(BE/E配对), 实为 %d' % n_e
+
+
+check('B-11', 'wx FLBSZ 撤销兜底 + SJTZ 撤销收口 COM 化', b11)
+
+# ---------------------------------------------------------------------------
+# B-12 wx 行内排版用标题文字 maxx 定位: 文字宽钳 <=220 且居中, 工件宽
+# >180 时文字 maxx 落在工件包络内 → 下一幅左移重叠。断言: 会话级右缘
+# 游标 *dt-wx-last-right* 存在, 既用于行内追加定位, 也在成功导出后更新。
+# ---------------------------------------------------------------------------
+def b12():
+    src = code_of('wx_runner.lsp')
+    if '*dt-wx-last-right*' not in src:
+        return False, '缺右缘游标 *dt-wx-last-right*'
+    if not re.search(r'\(\+ \*dt-wx-last-right\* 20\.0 box-gap\)', src):
+        return False, '行内追加未用右缘游标定位'
+    if '(setq *dt-wx-last-right* (+ ins-x unit-w))' not in src:
+        return False, '成功导出后未更新右缘游标'
+    return True, '右缘游标定义/消费/更新齐备'
+
+
+check('B-12', 'wx 行内排版改用真实右缘游标', b12)
 
 
 def main():

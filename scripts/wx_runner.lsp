@@ -20,7 +20,19 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.8
+;;; 版本: v2.9
+;;; v2.9  : 体检B-01/B-02/B-05/B-06/B-11/B-12 六项修复:
+;;;         ①精雕保色实参改 cur-doc —— flatten-layer 查 ByLayer 实体的
+;;;           "原图层色"必须查源侧, 传 tgt-doc 查到的是目标图 ensure 过
+;;;           的固定层色, 原色保留落空(v2.7 注释失实);
+;;;         ②兜底根目录 C:\Users\5600\... 改 USERPROFILE 推导(换机不炸);
+;;;         ③行内排版定位改会话级真实右缘游标 *dt-wx-last-right*(按目标
+;;;           图纸键控) —— 标题文字宽钳 <=220 且居中, 工件宽>180 时文字
+;;;           maxx 落在工件包络内, 旧写法两幅重叠; 跨会话回退文字 maxx;
+;;;         ④FLBSZ *error* 补 undo-started 兜底闭合包络框 UNDO 组;
+;;;         ⑤SJTZ 的 (command "_.UNDO" "E") 改 COM endundomark(归一坑#69);
+;;;         ⑥删除死全局 *dt-outsource-target-dwg* 与死函数 dt:sz-norm-ang
+;;;           (体检 grep 全库零引用取证)。
 ;;; v2.8  : 修复精雕图层合并未生效 + 层名改英文(用户实测反馈):
 ;;;         ①根因 = 临时实体在 cur-doc 而 v2.7 只在 tgt 建"精雕"层,
 ;;;           put-layer 因层不存在静默失败 —— 两个文档都 ensure JD 层;
@@ -71,7 +83,6 @@
 (vl-load-com)
 
 ;; 会话级全局记忆
-(setq *dt-outsource-target-dwg* nil) ;; 目标汇总图纸通用记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
 (setq *dt-jd-target-dwg* nil)        ;; 精雕目标图纸路径记忆
 (setq *dt-sz-multi-regions* nil)     ;; 多连通域检测状态
@@ -79,6 +90,8 @@
 (setq *dt-sjtz-mj* nil)              ;; 数据图纸模具编号记忆
 (setq *dt-sjtz-zxj* nil)             ;; 数据图纸中心距记忆
 (setq *dt-sjtz-flb* nil)             ;; 数据图纸分流板规格记忆
+(setq *dt-wx-last-right* nil)        ;; v2.9 上一幅排版真实右缘 X(会话级)
+(setq *dt-wx-last-right-path* nil)   ;; 右缘游标对应的目标图纸路径(换图即失效)
 (setq *dt-sjtz-rz* nil)              ;; 数据图纸热咀规格记忆
 (setq *dt-sjtz-cx* nil)              ;; 数据图纸出线记忆
 
@@ -695,7 +708,12 @@
 (defun dt:sz-auto-target-path (branch-name / def-root root cd s yy mm dd
                                            year-dir month-dir base-name def-path
                                            cur-mem latest-exist next-fname choice target)
-  (setq def-root (strcat "C:\\Users\\5600\\Documents\\CAD\\" branch-name))
+  ;; v2.9: 兜底根目录改 USERPROFILE 推导 —— 旧值硬编码本机用户名路径,
+  ;; 换机即往错误位置建目录; 下方盘符降级分支本就用同一 USERPROFILE 惯用法
+  (setq def-root (strcat (if (getenv "USERPROFILE")
+                           (getenv "USERPROFILE")
+                           "C:\\CAD")
+                         "\\Documents\\CAD\\" branch-name))
   (setq root (dt:sz-cfg-get branch-name "root" def-root))
   ;; 若 ini 中配置的路径盘符不存在，则自动降级到当前用户文档目录
   (if (and (wcmatch (strcase root) "*:*")
@@ -931,13 +949,6 @@
       (setq cands (reverse cands))))
   cands)
 
-;; 角度归一化到 [0, 2*pi)
-(defun dt:sz-norm-ang (a / two-pi)
-  (setq two-pi (* 2.0 pi))
-  (while (< a 0.0) (setq a (+ a two-pi)))
-  (while (>= a two-pi) (setq a (- a two-pi)))
-  a)
-
 ;; 在当前活动图纸中执行原生镜像 (优先 vla-mirror, 保底原生 _.MIRROR 命令)
 ;; v2.3: 镜像轴由调用方以任意两点 p1/p2 给出 (精雕用竖直轴实现右侧镜像)
 (defun dt:sz-mirror-in-curdoc (objs p1 p2 / m-objs new-o ss last-e e o)
@@ -992,6 +1003,11 @@
 
   ;; 1) 全自动计算并定位目标图纸全路径 (免弹窗选择)
   (setq target-path (dt:sz-auto-target-path title))
+  ;; v2.9: 右缘游标按目标图纸键控 —— 换图即失效, 防止把 A 图的右缘
+  ;; 用到 B 图(两图互不相干)
+  (if (not (equal target-path *dt-wx-last-right-path*))
+    (setq *dt-wx-last-right* nil
+          *dt-wx-last-right-path* target-path))
   (if (or (null target-path) (= target-path ""))
     (progn
       (princ (strcat "\n【" title "】未获取到有效目标图纸路径，操作已取消。"))
@@ -1055,9 +1071,16 @@
             ((= grid-n 0)
              (setq ins-x 0.0 y-top 0.0))                      ; 首幅(基线 0, 4e 回填)
             ((< grid-col per-row)
-             (setq ins-x (if (> row-maxx -1e98)
-                           (+ row-maxx 20.0 box-gap)          ; 盒右缘 + 盒间距
-                           box-gap)
+             ;; v2.9: 优先用本次会话上一幅真实右缘(*dt-wx-last-right*) ——
+             ;; 标题文字宽被钳到 <=220 且居中, 工件宽 >180 时文字 maxx 落在
+             ;; 工件包络内, 旧写法用文字 maxx 定位 → 两幅重叠(350 宽 FLB
+             ;; 必叠); 跨会话无游标时回退文字 maxx(旧行为)
+             (setq ins-x (cond
+                           (*dt-wx-last-right*
+                            (+ *dt-wx-last-right* 20.0 box-gap)) ; 内容右缘+盒边距+盒间距
+                           ((> row-maxx -1e98)
+                            (+ row-maxx 20.0 box-gap))           ; 盒右缘 + 盒间距
+                           (T box-gap))
                    y-top (- txt-min-y 50.0)))                 ; 行内追加: 与行顶对齐
             (T
              (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc)
@@ -1150,8 +1173,12 @@
                     (progn
                       (dt:sz-ensure-doc-layer tgt-doc "JD" 7)
                       (dt:sz-ensure-doc-layer cur-doc "JD" 7)
-                      (dt:sz-flatten-layer tgt-doc front-objs "JD")
-                      (dt:sz-flatten-layer tgt-doc back-objs "JD")))
+                      ;; v2.9: 实参改 cur-doc —— 实体此刻还是 cur-doc 的临时
+                      ;; 克隆(CopyObjects 在 4e 步才发生), 查 ByLayer 实体的
+                      ;; "原图层色"必须查源侧; 传 tgt-doc 查到的是目标图刚被
+                      ;; ensure 成固定色的同名层, 原色保留落空(v2.7 注释失实)
+                      (dt:sz-flatten-layer cur-doc front-objs "JD")
+                      (dt:sz-flatten-layer cur-doc back-objs "JD")))
 
                   ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
                   ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
@@ -1270,6 +1297,8 @@
                                  (if (equal title "精雕") ", 镜像在右侧 75mm, 已加包络盒" "")
                                  ", 上方已标注文件名)"))
                   (princ "\n------------------------------------------------------------")
+                  ;; v2.9: 记录本幅真实右缘, 下一幅行内追加以它定位(见上)
+                  (setq *dt-wx-last-right* (+ ins-x unit-w))
                   T)))))))))
 
 ;; ============================================================================
@@ -1278,8 +1307,13 @@
 
 ;; 测量分流板主命令 (c:FLBSZ / c:FLBSIZE)
 (defun c:FLBSZ ( / *error* ss cands closed-p box len wid p1 p2 p3 p4 ang
-                   clip-str msg choice)
+                   clip-str msg choice undo-started)
   (defun *error* (msg)
+    ;; v2.9: 包络框绘制的 UNDO 组(command BE)在出错路径也要闭合,
+    ;; 惯用法与 c:SJTZ 一致(标记 + vla-endundomark 收口, catch 双保险)
+    (if undo-started
+      (vl-catch-all-apply 'vla-endundomark
+                          (list (vla-get-activedocument (vlax-get-acad-object)))))
     (if (and msg
              (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
       (princ (strcat "\n【分流板尺寸】错误: " msg)))
@@ -1373,6 +1407,7 @@
           (setq choice (getkword "\n是否在 FLB_BOX 图层绘制包络矩形与长宽标注(字高15)? [是(Y)/否(N)] <Y>: "))
           (if (or (null choice) (= (strcase choice) "Y"))
             (progn
+              (setq undo-started T)
               (command "_.UNDO" "BE")
               (dt:sz-draw-box-dim p1 p2 p3 p4)
               (command "_.UNDO" "E")
@@ -1528,7 +1563,9 @@
           (setq new-bb (dt:rect-bbox new-objs))
           (if (null new-bb)
             (progn
-              (command "_.UNDO" "E")
+              ;; v2.9: 1507 用 vla-startundomark 开组, 这里也用 COM 收口
+              ;; (原 command "_.UNDO" "E" 属 API 混用, 与坑#69 全 COM 化相悖)
+              (vl-catch-all-apply 'vla-endundomark (list doc))
               (princ "\n【数据图纸】未能计算新图形范围。"))
             (progn
               (setq minx (car new-bb)
