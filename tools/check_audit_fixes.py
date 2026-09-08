@@ -158,15 +158,22 @@ check('B-02', 'wx 兜底根目录改 USERPROFILE 推导', b02)
 # ---------------------------------------------------------------------------
 def dead_symbols():
     src = code_of('wx_runner.lsp')
+    jrt = code_of('jrt_runner.lsp')
     problems = []
     if '*dt-outsource-target-dwg*' in src:
         problems.append('wx 仍有死全局 *dt-outsource-target-dwg*')
     if 'dt:sz-norm-ang' in src:
         problems.append('wx 仍有死函数 dt:sz-norm-ang')
-    return not problems, ('; '.join(problems) if problems else '两个死符号均已清除')
+    if 'dt:jrt2-out-end' in jrt:
+        problems.append('jrt 仍有死函数 dt:jrt2-out-end')
+    n_undo_end = len(re.findall(r'\(defun dt:jrt-undo-end', jrt))
+    if n_undo_end != 1:
+        problems.append('dt:jrt-undo-end 应恰好定义 1 次, 实为 %d' % n_undo_end)
+    return not problems, ('; '.join(problems) if problems
+                          else '死符号清零, dt:jrt-undo-end 唯一定义')
 
 
-check('B-05/B-06', 'wx 死全局/死函数清除', dead_symbols)
+check('B-03/B-04/B-05/B-06', '死代码清除(wx×2, jrt×2 含重复defun)', dead_symbols)
 
 # ---------------------------------------------------------------------------
 # B-11 wx FLBSZ 撤销组兜底 + SJTZ API 混用: FLBSZ 的 *error* 只打印不闭合

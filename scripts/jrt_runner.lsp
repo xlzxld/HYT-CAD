@@ -1,5 +1,10 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.31
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.32
+;;; v9.32  : 体检B-03/B-04 死代码清理(行为零变化): ①删除重复定义的
+;;;          dt:jrt-undo-end(连续两个逐字相同定义, v9.17~9.21 括号修补
+;;;          残留); ②删除全库零调用的 dt:jrt2-out-end(v9.27 实际落地为
+;;;          hook-one 内联里外分类, 函数从未被调用; 同步移出
+;;;          check_lisp.py 关键函数名单, 历史定义见 git)。
 ;;; v9.31  : 体检A-01/B-08: ①通用二重跑幂等 —— 重跑清理只删图层 "JRT"
 ;;;          的句柄, 而出线口产物(颈线两壁/封口/圆角, dt:jrt2-neck)全在
 ;;;          "JT" 层且函数无存在性守卫 → 连跑两次逐项叠加永不清除; 清理
@@ -244,12 +249,6 @@
   (vl-catch-all-apply
     '(lambda ( )
        (vla-StartUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
-
-(defun dt:jrt-undo-end ( )
-  (vl-catch-all-apply
-    '(lambda ( )
-       (vla-EndUndoMark (vla-get-activedocument (vlax-get-acad-object))))))
-
 
 (defun dt:jrt-undo-end ( )
   (vl-catch-all-apply
@@ -2174,18 +2173,8 @@
 
 ;; v9.27: 直线端点里外分类 —— 返回"落在轮廓围合区域外"的那一端点;
 ;; 两端同里/同外/区域不可判 → nil(调用方走旧启发式兜底)
-(defun dt:jrt2-out-end (ln region / a b ia ib)
-  (cond
-    ((or (null ln) (null region)) nil)
-    (T
-     (setq a (vlax-curve-getstartpoint ln)
-           b (vlax-curve-getendpoint ln)
-           ia (dt:jrt2-pt-inside a region)
-           ib (dt:jrt2-pt-inside b region))
-     (cond
-       ((and ia (not ib)) b)
-       ((and ib (not ia)) a)
-       (T nil)))))
+;; (v9.32: 本函数从未被调用 —— v9.27 实际落地为 hook-one 内联分类,
+;;  全库零引用, 死代码删除; 历史定义见 git)
 
 ;; 用 [p1 p2] 重建直线段(置 JRT 层), 删原线返回新 vla(v9.27 裁剪用)
 (defun dt:jrt2-seg-rebuild (ln p1 p2 / new)
