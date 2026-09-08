@@ -1,6 +1,10 @@
 ﻿;;; ============================================================================
 ;;; 程序名 : 流道线双向偏移 + 区域裁剪 + 断口圆角 + 通道封口 + 螺丝孔定位
-;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.7
+;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.8
+;;; v10.8  : 体检A-03: dt:jt-build(包络法假体)取 FLB 包络盒未过滤实体
+;;;          类型 —— 倒角失败标注文字(chamfer-close 标注 FBX, merge-layer
+;;;          并入 FLB)的 boundingbox 被计入 → JT 假体沿标注方向不对称
+;;;          撑大。objs 改经 dt:curves-only 过滤(与 jrt dt:jrt2-neck 同规)。
 ;;; v10.7  : 体检A-02根治(与 cx v11.4 / jrt v9.30 同期): LWPolyline 的
 ;;;          ObjectName 实为 "AcDbPolyline", dt:poly-pts/dt:seg-rebuild
 ;;;          的 is-2d 单名 "(= ... \"AcDbLWPolyline\")" 判定恒 nil →
@@ -1519,7 +1523,10 @@
 (defun dt:jt-build (hole-dist offset-dist hole-layer / d objs bb
                     x0 y0 x1 y1 r ms no)
   (setq d (- hole-dist offset-dist))
-  (setq objs (dt:layer-vlas "FLB"))
+  ;; v10.8: curves-only 过滤 —— FLB 层并入了封口倒角失败标注文字
+  ;; (chamfer-close 标注 FBX → merge-layer 并入 FLB), 文字也有 boundingbox,
+  ;; 混入会把 JT 假体包络盒沿标注方向撑大(与 jrt dt:jrt2-neck 取边同规)
+  (setq objs (dt:curves-only (dt:layer-vlas "FLB")))
   (cond
     ((or (<= d 1.0) (null objs)) nil)
     (T

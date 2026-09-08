@@ -98,6 +98,24 @@ def b08():
 check('B-08', 'jrt wall-tan 端点取样判空', b08)
 
 
+# ---------------------------------------------------------------------------
+# A-03 flb 包络法假体包络盒混入文字: dt:jt-build 取 FLB 包络盒未过滤实体
+# 类型, 倒角失败标注文字(chamfer-close 标注 FBX → merge-layer 并入 FLB)
+# 的 boundingbox 被计入 → JT 假体沿标注方向不对称撑大。
+# 断言: objs 必须经 dt:curves-only 过滤后再取包络盒。
+# ---------------------------------------------------------------------------
+A03 = re.compile(
+    r'\(setq objs \(dt:curves-only \(dt:layer-vlas "FLB"\)\)\)')
+
+
+def a03():
+    src = load('flb_runner.lsp')
+    return bool(A03.search(src)), 'dt:jt-build 未对 FLB 实体做 curves-only 过滤'
+
+
+check('A-03', 'flb 包络法假体包络盒剔除文字标注', a03)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]
