@@ -20,6 +20,10 @@ __pycache__/
 *.err
 *.log
 
+# 2.1 CAD 运行产物(体检 C-02/C-03: 图纸产物不入库, 可由命令再生)
+*.dwg
+tools/*_out.dxf
+
 # 3. 操作系统与文件管理器产物
 Thumbs.db
 ehthumbs.db
