@@ -1,5 +1,11 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.3
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.4
+;;; v11.4  : 体检A-02根治(与 flb v10.7 / jrt v9.30 同期): LWPolyline 的
+;;;          ObjectName 实为 "AcDbPolyline", dt:poly-pts/dt:seg-rebuild
+;;;          的 is-2d 单名 "(= ... \"AcDbLWPolyline\")" 判定恒 nil →
+;;;          多段线重建时 2D 平铺坐标按 3 元素错位切分、误建 3D 多段线。
+;;;          两处改双名 member; dt:set-endpoint 同款死子句清除。
+;;;          新增回归 tools/check_audit_fixes.py。
 ;;; v11.3  : 用户实测修复(v11.2 仍"两侧都放不出板"):
 ;;;          ①根因 = find-wall 只认 AcDbLine, 源线用 PL 多段线画时通道壁
 ;;;            也是多段线(偏移产物), 恒被判"非直线"跳过 → 新增
@@ -327,7 +333,7 @@
 ;; 取多段线的全部顶点(3D点列表)
 (defun dt:poly-pts (obj / coords is-2d n i pts)
   (setq coords (vlax-safearray->list (vlax-variant-value (vla-get-coordinates obj)))
-        is-2d   (= (vla-get-objectname obj) "AcDbLWPolyline"))
+        is-2d   (member (vla-get-objectname obj) '("AcDbLWPolyline" "AcDbPolyline")))
   (if is-2d
     (setq n (/ (length coords) 2))
     (setq n (/ (length coords) 3)))
@@ -464,8 +470,7 @@
 ;;  vla-put-startpoint 对 AcDbArc 无效(静默失败), 导致圆弧端头修剪失效,
 ;;  圆角弧"单独加上去"(残余线未剪)。改为设置 StartAngle/EndAngle。
 (defun dt:set-endpoint (obj et pt / is-poly is-arc c r ang n)
-  (setq is-poly (or (= (vla-get-objectname obj) "AcDbLWPolyline")
-                    (= (vla-get-objectname obj) "AcDbPolyline"))
+  (setq is-poly (= (vla-get-objectname obj) "AcDbPolyline")
         is-arc  (= (vla-get-objectname obj) "AcDbArc"))
   (cond
     (is-poly
@@ -579,7 +584,7 @@
      (setq new-obj (vla-addarc (dt:ms) (vlax-3d-point center) radius
                                (+ start-a t1) (+ start-a t2))))
     (T
-     (setq is-2d (= obj-type "AcDbLWPolyline"))
+     (setq is-2d (member obj-type '("AcDbLWPolyline" "AcDbPolyline")))
      (setq new-obj (dt:poly-rebuild obj t1 t2 (dt:poly-pts obj) is-2d))))
   (if new-obj (vla-put-layer new-obj layer))
   new-obj)

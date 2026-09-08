@@ -1,6 +1,12 @@
 ;;; ============================================================================
 ;;; 程序名 : 流道线双向偏移 + 区域裁剪 + 断口圆角 + 通道封口 + 螺丝孔定位
-;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.6
+;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.7
+;;; v10.7  : 体检A-02根治(与 cx v11.4 / jrt v9.30 同期): LWPolyline 的
+;;;          ObjectName 实为 "AcDbPolyline", dt:poly-pts/dt:seg-rebuild
+;;;          的 is-2d 单名 "(= ... \"AcDbLWPolyline\")" 判定恒 nil →
+;;;          多段线重建时 2D 平铺坐标按 3 元素错位切分、误建 3D 多段线。
+;;;          两处改双名 member; dt:set-endpoint 同款死子句清除。
+;;;          新增回归 tools/check_audit_fixes.py。
 ;;; v10.6  : 健壮性修复(与 slot v10.3 / jrt v9.14 / dt_start v2.8 同期,
 ;;;          几何行为零变化):
 ;;;          1) 非曲线实体防护补全 —— v10.2b 只防了封口/端点收集侧, 本次
@@ -434,7 +440,7 @@
 ;; 取多段线的全部顶点(3D点列表)
 (defun dt:poly-pts (obj / coords is-2d n i pts)
   (setq coords (vlax-safearray->list (vlax-variant-value (vla-get-coordinates obj)))
-        is-2d   (= (vla-get-objectname obj) "AcDbLWPolyline"))
+        is-2d   (member (vla-get-objectname obj) '("AcDbLWPolyline" "AcDbPolyline")))
   (if is-2d
     (setq n (/ (length coords) 2))
     (setq n (/ (length coords) 3)))
@@ -577,8 +583,7 @@
 ;;  vla-put-startpoint 对 AcDbArc 无效(静默失败), 导致圆弧端头修剪失效,
 ;;  圆角弧"单独加上去"(残余线未剪)。改为设置 StartAngle/EndAngle。
 (defun dt:set-endpoint (obj et pt / is-poly is-arc c r ang n)
-  (setq is-poly (or (= (vla-get-objectname obj) "AcDbLWPolyline")
-                    (= (vla-get-objectname obj) "AcDbPolyline"))
+  (setq is-poly (= (vla-get-objectname obj) "AcDbPolyline")
         is-arc  (= (vla-get-objectname obj) "AcDbArc"))
   (cond
     (is-poly
@@ -692,7 +697,7 @@
      (setq new-obj (vla-addarc (dt:ms) (vlax-3d-point center) radius
                                (+ start-a t1) (+ start-a t2))))
     (T
-     (setq is-2d (= obj-type "AcDbLWPolyline"))
+     (setq is-2d (member obj-type '("AcDbLWPolyline" "AcDbPolyline")))
      (setq new-obj (dt:poly-rebuild obj t1 t2 (dt:poly-pts obj) is-2d))))
   (if new-obj (vla-put-layer new-obj layer))
   new-obj)
