@@ -94,14 +94,36 @@ def split_top_level(text):
     return blocks
 
 
+def top_level_span(text, pos):
+    """pos 所在的顶层(深度 0→1)表达式区间 [start, end); 不在任何顶层
+    表达式内(括号不平衡)返回 None。与 split_top_level 同口径。"""
+    depth = 0
+    start = None
+    for i, c in enumerate(text):
+        if c == '(':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == ')':
+            depth -= 1
+            if depth == 0 and start is not None and start <= pos <= i:
+                return (start, i + 1)
+    return None
+
+
 def check_file(path):
-    src = strip_comments(open(path, encoding='utf-8-sig').read())
+    with open(path, encoding='utf-8-sig') as f:
+        src = strip_comments(f.read())
     problems = []
     for name, blk in split_top_level(src):
         safe_wrapper = name in ('dt:st-gets', 'dt:st-hasvar')
         for m in list(GETVAR_RE.finditer(blk)) + list(GETVAR_APPLY_RE.finditer(blk)):
             var = m.group(1).upper()
-            guarded = '(null ' in blk                       # 同函数内做过判空
+            # v2: 判空作用域从"整个函数块"收紧到"该 getvar 所在的顶层
+            #     表达式" —— 旧口径下函数内任意一处 (null 即豁免本函数
+            #     全部 gated getvar(假阴性), 与本次取值是否判空无关也放行
+            span = top_level_span(blk, m.start())
+            guarded = bool(span) and '(null ' in blk[span[0]:span[1]]
             if safe_wrapper:
                 continue
             # B) 先查最硬的一条: getvar 结果直接进了吞字符串的函数

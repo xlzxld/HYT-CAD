@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
-"""offset_runner.lsp 结构校验工具(AGENTS.md 第11节流程的强化版)。
-用法: python check_lisp.py [文件名]
+"""AutoLISP 单文件结构校验门禁(AGENTS.md §2 静态检查)。
+用法: python tools/check_lisp.py <scripts/xxx.lsp> (必须传文件参数)
 检查: BOM / 括号 stack 平衡(处理字符串与 \" 转义) / defun 计数 /
       command 全部为 UNDO 分组 / TRIM 残留 / 指定函数存在性 / 死名残留。"""
 import re
 import sys
 
-P = sys.argv[1] if len(sys.argv) > 1 else 'offset_runner.lsp'
-raw = open(P, 'rb').read()
+if len(sys.argv) < 2:
+    print('用法: python tools/check_lisp.py <scripts/xxx.lsp>')
+    sys.exit(2)
+P = sys.argv[1]
+with open(P, 'rb') as f:
+    raw = f.read()
 
 ok = True
 def fail(msg):

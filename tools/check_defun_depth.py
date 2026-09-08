@@ -9,7 +9,8 @@ BS = chr(92)
 
 
 def scan(path):
-    src = open(path, 'rb').read().decode('utf-8-sig', 'replace')
+    with open(path, 'rb') as f:
+        src = f.read().decode('utf-8-sig', 'replace')
     bal = 0
     in_str = in_com = esc = False
     ln = 0

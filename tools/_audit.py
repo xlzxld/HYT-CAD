@@ -106,7 +106,8 @@ def split_top_level(src):
 
 
 def analyze(path):
-    raw = io.open(path, encoding='utf-8-sig').read()
+    with io.open(path, encoding='utf-8-sig') as f:
+        raw = f.read()
     code = strip_comments(raw)
     defs, symcount = {}, defaultdict(int)
     for lineno, txt in split_top_level(code):

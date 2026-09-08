@@ -133,7 +133,8 @@ def main():
     ok = True
     os.makedirs(DST, exist_ok=True)
     for fn in FILES:
-        text = open(os.path.join(SRC, fn), encoding='utf-8-sig').read()
+        with open(os.path.join(SRC, fn), encoding='utf-8-sig') as f:
+            text = f.read()
         for k, v in REPL.items():
             text = text.replace(k, v)
         try:
@@ -143,7 +144,8 @@ def main():
             print('[FAIL] %s: 存在 GBK 不可编码字符 %r(请在 REPL 表补等价替换)' % (fn, ch))
             ok = False
             continue
-        open(os.path.join(DST, fn), 'wb').write(data)
+        with open(os.path.join(DST, fn), 'wb') as f:
+            f.write(data)
 
         # ---- 校验: 逐字节读取器模拟 vs 原件 ----
         g_strs, bal, min_bal, errors = parse_bytes(data)
