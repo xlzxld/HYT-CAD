@@ -238,6 +238,26 @@ def b10():
 check('B-10', 'cx T接宿主壁存活复检', b10)
 
 
+# ---------------------------------------------------------------------------
+# B-09 flb *error* 撤销兜底失效: 坑#69(jrt v9.17 定案)—— *error* 内调
+# (command) 会抛错并被 catch 吞掉, 兜底恰在出错场景失效、UNDO 组悬挂。
+# 断言: c:FLB 的 *error* 兜底为 COM vla-EndUndoMark, 旧 command 兜底消失。
+# ---------------------------------------------------------------------------
+B09_OLD = re.compile(r"'\(lambda \( \) \(command \"_\.UNDO\" \"E\"\)\)")
+
+
+def b09():
+    src = code_of('flb_runner.lsp')
+    if B09_OLD.search(src):
+        return False, '*error* 仍在 *error* 内用 (command "_.UNDO" "E") 兜底'
+    if 'vla-EndUndoMark' not in src:
+        return False, 'flb 缺 COM EndUndoMark 兜底'
+    return True, '*error* 兜底已 COM 化'
+
+
+check('B-09', 'flb *error* 撤销兜底 COM 化', b09)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]

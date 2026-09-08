@@ -1,6 +1,12 @@
 ﻿;;; ============================================================================
 ;;; 程序名 : 流道线双向偏移 + 区域裁剪 + 断口圆角 + 通道封口 + 螺丝孔定位
-;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.8
+;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.9
+;;; v10.9  : 体检B-09: c:FLB 的 *error* 撤销兜底由 (command "_.UNDO" "E")
+;;;          改 COM vla-EndUndoMark —— 坑#69(jrt v9.17 定案): *error* 内调
+;;;          (command) 在部分版本抛错并被 catch 吞掉, 兜底恰在出错场景
+;;;          失效、UNDO 组悬挂; EndUndoMark 无开放标记时无副作用。
+;;;          注: 流程内部 9 处 (command "_.UNDO" "BE"/"E") 子组保持原样
+;;;          (最小改动; 单独命令行调用子流程时仍无独立收口, 已知局限)。
 ;;; v10.8  : 体检A-03: dt:jt-build(包络法假体)取 FLB 包络盒未过滤实体
 ;;;          类型 —— 倒角失败标注文字(chamfer-close 标注 FBX, merge-layer
 ;;;          并入 FLB)的 boundingbox 被计入 → JT 假体沿标注方向不对称
@@ -2392,9 +2398,14 @@
                ss total ok-count skip-count total-purged res-off l)
 
   ;; ---- 内部错误处理: 出错或按 ESC 中断时给出友好提示 ----
-  ;; v10.6: 兜底闭合可能悬挂的 UNDO 组(无开放组时无副作用, catch 双保险)
+  ;; v10.9: 兜底闭合可能悬挂的 UNDO 组(无开放组时无副作用, catch 双保险)。
+  ;; v10.9 改 COM EndUndoMark —— 坑#69(jrt v9.17 定案): *error* 内调
+  ;; (command) 在部分版本抛"push-error-using-command 前无法调用"并被
+  ;; catch 吞掉 → 兜底恰在出错场景失效、UNDO 组悬挂(jrt dt:jrt-undo-end 同款)
   (defun *error* (msg)
-    (vl-catch-all-apply '(lambda ( ) (command "_.UNDO" "E")))
+    (vl-catch-all-apply
+      '(lambda ( )
+         (vla-EndUndoMark (vla-get-activedocument (vlax-get-acad-object)))))
     (princ (strcat "\n程序已停止: " (if msg msg "用户按 ESC 取消")))
     (princ)
   )
