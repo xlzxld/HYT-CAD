@@ -1,5 +1,12 @@
 ;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.30
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.31
+;;; v9.31  : 体检A-01/B-08: ①通用二重跑幂等 —— 重跑清理只删图层 "JRT"
+;;;          的句柄, 而出线口产物(颈线两壁/封口/圆角, dt:jrt2-neck)全在
+;;;          "JT" 层且函数无存在性守卫 → 连跑两次逐项叠加永不清除; 清理
+;;;          改 member '("JRT" "JT")(仅清 *jrt2-made* 记忆句柄, flb 假体
+;;;          的 JT 实体不在记忆中, 不受影响)。②dt:jrt2-wall-tan 终点侧
+;;;          取样补 v9.25 双判规范(交点距壁端 <0.01 时 getpointatdist
+;;;          越界返 nil, (nth 0 p2) 抛参数类型错误)。
 ;;; v9.30  : 体检A-02根治(与 cx v11.4 / flb v10.7 同期): LWPolyline 的
 ;;;          ObjectName 实为 "AcDbPolyline", dt:poly-pts/dt:seg-rebuild
 ;;;          的 is-2d 单名 "(= ... \"AcDbLWPolyline\")" 判定恒 nil →
@@ -2002,15 +2009,23 @@
   (if (or (vl-catch-all-error-p dist) (null dist))
     nil
     (progn
+      ;; v9.31: 端点侧取样与起点侧对称判空 —— 交点距壁端 <0.01 时
+      ;; (+ dist 0.01) 越界, getpointatdist 返 nil 而不抛错(v9.25 头注),
+      ;; (nth 0 p2) 直接入减法会抛参数类型错误(v9.25 双判规范漏此一处)
       (setq p1 (vl-catch-all-apply 'vlax-curve-getpointatdist
                  (list curve (max 0.0 (- dist 0.01))))
             p2 (vl-catch-all-apply 'vlax-curve-getpointatdist
-                 (list curve (+ dist 0.01)))
-            v  (list (- (nth 0 p2) (nth 0 p1)) (- (nth 1 p2) (nth 1 p1)) 0.0)
-            ul (sqrt (+ (* (nth 0 v) (nth 0 v)) (* (nth 1 v) (nth 1 v)))))
-      (if (< ul 1e-9)
-        nil
-        (list (/ (nth 0 v) ul) (/ (nth 1 v) ul) 0.0)))))
+                 (list curve (+ dist 0.01))))
+      (if (and p1 p2
+               (not (vl-catch-all-error-p p1))
+               (not (vl-catch-all-error-p p2)))
+        (progn
+          (setq v  (list (- (nth 0 p2) (nth 0 p1)) (- (nth 1 p2) (nth 1 p1)) 0.0)
+                ul (sqrt (+ (* (nth 0 v) (nth 0 v)) (* (nth 1 v) (nth 1 v)))))
+          (if (< ul 1e-9)
+            nil
+            (list (/ (nth 0 v) ul) (/ (nth 1 v) ul) 0.0)))
+        nil))))
 
 ;; 交点列表里取离指定点最近者
 (defun dt:jrt2-near-pt (pts ref / best bd p dd)
@@ -2353,13 +2368,17 @@
           (setq doc    (vla-get-activedocument (vlax-get-acad-object))
                 layers (vla-get-layers doc))
           (dt:ensure-layer layers "JRT" 2 "黄色")
-          ;; ---- 2) 删除上一轮产物(句柄记忆) ----
+          ;; ---- 2) 删除上一轮产物(句柄记忆; v9.31: "JT" 层出线口产物一并
+          ;;         清除 —— 旧版只认 "JRT", 颈线/两壁/封口/圆角重跑永不
+          ;;         清除逐次叠加; 仅清 *jrt2-made* 记忆句柄, flb 假体的
+          ;;         JT 实体不在记忆中, 不受影响) ----
           (dt:jrt-undo-mark)
           (foreach h *jrt2-made*
             (if (handent h)
               (progn
                 (setq obj (vlax-ename->vla-object (handent h)))
-                (if (equal (vl-catch-all-apply 'vla-get-layer (list obj)) "JRT")
+                (if (member (vl-catch-all-apply 'vla-get-layer (list obj))
+                            '("JRT" "JT"))
                   (vl-catch-all-apply 'vla-delete (list obj))))))
           (dt:jrt-undo-end)
           ;; ---- 3) 源线过滤并组成"条" ----

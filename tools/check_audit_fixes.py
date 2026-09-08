@@ -63,6 +63,41 @@ def a02():
 check('A-02', '多段线类名判定恒假根治(cx/flb/jrt 各2处)', a02)
 
 
+# ---------------------------------------------------------------------------
+# A-01 通用二出线口重跑不幂等: 重跑清理(遍历 *jrt2-made*)只删图层 "JRT"
+# 的句柄, 而 dt:jrt2-neck 产物全部画在 "JT" 层 → 旧出线口永不清除, 逐次
+# 叠加。断言: 清理分支的图层判定为双成员 member '("JRT" "JT")。
+# ---------------------------------------------------------------------------
+A01 = re.compile(
+    r"member\s*\(vl-catch-all-apply 'vla-get-layer \(list obj\)\)"
+    r"\s*'\(\"JRT\" \"JT\"\)")
+
+
+def a01():
+    src = load('jrt_runner.lsp')
+    return bool(A01.search(src)), "未找到清理分支 member '(\"JRT\" \"JT\")"
+
+
+check('A-01', 'jrt 通用二出线口重跑幂等(清理含 JT 层)', a01)
+
+# ---------------------------------------------------------------------------
+# B-08 dt:jrt2-wall-tan 终点侧取样未判空: 交点距壁端 <0.01 时
+# getpointatdist(+dist 0.01) 越界返 nil(低版本不抛错), (nth 0 p2) 直接
+# 入减法 → 参数类型错误。断言: 函数内存在 p1/p2 非 nil + error-p 双判。
+# ---------------------------------------------------------------------------
+B08 = re.compile(
+    r"\(and p1 p2\s*\(not \(vl-catch-all-error-p p1\)\)"
+    r"\s*\(not \(vl-catch-all-error-p p2\)\)\)")
+
+
+def b08():
+    src = load('jrt_runner.lsp')
+    return bool(B08.search(src)), 'dt:jrt2-wall-tan 缺 p1/p2 双判'
+
+
+check('B-08', 'jrt wall-tan 端点取样判空', b08)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]
