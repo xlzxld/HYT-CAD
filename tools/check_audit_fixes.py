@@ -206,6 +206,38 @@ def b12():
 check('B-12', 'wx 行内排版改用真实右缘游标', b12)
 
 
+# ---------------------------------------------------------------------------
+# B-07 cx 3D 折线静默忽略: dt:cx-yxb-segs-of 的 member 表含无效类名
+# "AcDbLWPolyline"(死项)且缺 "AcDb3dPolyline" → 3D 折线落入 (T nil) 被静默
+# 跳过, 与函数头注释"3D 折线按直段处理"矛盾。断言: member 表三真实类名。
+# ---------------------------------------------------------------------------
+B07 = re.compile(
+    r"\(member oname '\(\"AcDb2dPolyline\" \"AcDbPolyline\" \"AcDb3dPolyline\"\)\)")
+
+
+def b07():
+    src = code_of('cx_runner.lsp')
+    return bool(B07.search(src)), 'segs-of 的 member 表未改为三个真实类名'
+
+
+check('B-07', 'cx segs-of 3D 折线入列+死类名清除', b07)
+
+# ---------------------------------------------------------------------------
+# B-10 cx 宿主壁失效引用: 同一宿主壁两端各命中 T 接时, 第二处循环的 host
+# 已被首次 break-curve(删旧建新)删除, 对已删实体的几何调用抛错中断整个
+# 阶段。断言: break-curve 前存在 host 存活复检。
+# ---------------------------------------------------------------------------
+B10 = re.compile(r"vlax-erased-p \(list host\)")
+
+
+def b10():
+    src = code_of('cx_runner.lsp')
+    return bool(B10.search(src)), 'dt:cx-join 的 host 缺存活复检'
+
+
+check('B-10', 'cx T接宿主壁存活复检', b10)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]

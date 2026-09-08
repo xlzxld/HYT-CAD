@@ -1,5 +1,13 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.4
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.5
+;;; v11.5  : 体检B-07/B-10: ①dt:cx-yxb-segs-of 的 member 表含无效类名
+;;;          "AcDbLWPolyline"(死项)且缺 "AcDb3dPolyline" → 3D 折线落入
+;;;          (T nil) 被静默忽略, 与头注"3D 折线按直段处理"矛盾; 表改
+;;;          三个真实类名(getbulge 已有 catch, 3D 折线天然按直段)。
+;;;          ②dt:cx-join 的 T 接打断前补 host 存活复检 —— 同一宿主壁
+;;;          两端各命中 T 接时, 第二处循环的 host 已被首次打断删除,
+;;;          对已删实体求几何会抛错中断整个收头/大圆角阶段; 失效则
+;;;          跳过该处打断(下游"未找到配对断头"自然计入 count-fail)。
 ;;; v11.4  : 体检A-02根治(与 flb v10.7 / jrt v9.30 同期): LWPolyline 的
 ;;;          ObjectName 实为 "AcDbPolyline", dt:poly-pts/dt:seg-rebuild
 ;;;          的 is-2d 单名 "(= ... \"AcDbLWPolyline\")" 判定恒 nil →
@@ -1091,7 +1099,7 @@
 (defun dt:cx-join (layer r center-lines slot-dist exclude ext-rec /
                      vla-list rec obj et orig newp hit ep hits misses
                      cp host done-cps heads h res count-ok count-fail
-                     i j h1 h2 fwd hh pick)
+                     i j h1 h2 fwd hh pick host-alive)
   (if (null layer) (setq layer "CX"))
   (if (null r) (setq r *dt-cx-fillet-r-large*))
   (setq vla-list (dt:curves-only (dt:layer-vlas layer)))
@@ -1167,7 +1175,15 @@
                    (princ "\n【出线槽】警告: 交点附近找不到两条源线, 跳过该处圆角。")
                    (setq count-fail (1+ count-fail)))
                  (progn
-                   (dt:break-curve host (list cp) layer)
+                   ;; v11.5: host 存活复检 —— 同一宿主壁两端各命中 T 接时,
+                   ;; 第二处循环的 host 已被首次 break-curve(删旧建新)删除,
+                   ;; 对已删实体求几何会抛错中断整个收头/大圆角阶段; 复检
+                   ;; 失败视为仍有效(与上方 v10.1 ext-rec 惯用法一致), 跳过
+                   ;; 打断后由下方"未找到配对断头"路径自然计入 count-fail
+                   (setq host-alive (vl-catch-all-apply 'vlax-erased-p (list host)))
+                   (if (and (not (vl-catch-all-error-p host-alive)) host-alive)
+                     (princ "\n【出线槽】警告: 宿主壁已失效(同壁多处T接), 跳过该处打断。")
+                     (dt:break-curve host (list cp) layer))
                    ;; 重收集交点处端头(打断后宿主产生两个新断头)
                    (setq hh nil)
                    (foreach h (dt:collect-heads (dt:layer-vlas layer) exclude)
@@ -1586,7 +1602,7 @@
      (list (list (vlax-curve-getstartpoint o) (vlax-curve-getendpoint o) nil)))
     ((= oname "AcDbArc")
      (list (list (vlax-curve-getstartpoint o) (vlax-curve-getendpoint o) T)))
-    ((member oname '("AcDbLWPolyline" "AcDb2dPolyline" "AcDbPolyline"))
+    ((member oname '("AcDb2dPolyline" "AcDbPolyline" "AcDb3dPolyline"))
      (setq ep (vl-catch-all-apply 'vlax-curve-getendparam (list o)))
      (cond
        ((or (vl-catch-all-error-p ep) (not (numberp ep))) nil)
