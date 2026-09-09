@@ -1,5 +1,16 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.6
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.7
+;;; v11.7  : 压线板两项修复(用户实测 1/2.dxf+png):
+;;;          ①左壁畸形根治: dt:cx-yxb-draw 的本地映射(+X→外法向 nrm,
+;;;            +Y→壁向 u)在左壁侧(nrm=rot90ccw(u), 外法向未翻转)是
+;;;            左手系(镜像), 而弧角按纯旋转 +a1 处理 → 两条 R4.3 过渡弧
+;;;            各偏 90°, 接不上上下边线, 板全数断开(右壁恰好右手系
+;;;            无事, 故"左壁畸形/右壁正常")。镜像系(hand=nrm×u<0)下
+;;;            弧角区间反向 [s,e]→[a1-e, a1-s]。
+;;;          ②新增内壁/外壁取侧: 曲折出线槽的左/右壁随各源线绘制方向
+;;;            漂移(同一圈一半内一半外)。选 Inner/Outer 时按"相连源线
+;;;            (相交或端头距离≤1.2×偏移)中点多数侧=内侧"整圈一致取侧;
+;;;            左/右壁语义保留(直线出线槽沿用)。
 ;;; v11.6  : 加载横幅 7 行精简为一行(命令教学移出加载期, 工作流规则已载
 ;;;          README_CAD.md) + 新增 *dt-cx-ver* 版本单一来源(根治横幅版本
 ;;;          号长期滞后, 本次 v11.3 → v11.6 追平)。
@@ -117,7 +128,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-cx-ver* "v11.6")
+(setq *dt-cx-ver* "v11.7")
 
 ;; ============================================================================
 ;; 出线槽参数 —— 由 dt:cx-param-table 驱动(默认值/预填/应用/恢复默认),
@@ -1455,8 +1466,14 @@
         (+ (cadr o) (* (cadr u) ly) (* (cadr nrm) lx))
         0.0))
 
-(defun dt:cx-yxb-draw (o u nrm layer / a1 ents e t1 t2)
+(defun dt:cx-yxb-draw (o u nrm layer / a1 hand ents e t1 t2)
+  ;; v11.7: 本地系(+X→nrm, +Y→u)在 nrm=rot90ccw(u)(左壁侧, 外法向未翻转)
+  ;; 是左手系(det=-1, 镜像) —— 直线镜像后仍精确, 但弧角按纯旋转 +a1 会各
+  ;; 偏 90°, 两条 R4.3 过渡弧接不上上下边线(1.dxf 实测 42/42 板全数断开;
+  ;; 右壁 nrm=rot90cw(u) 恰好右手系, 故仅左壁畸形)。镜像系下弧角区间须
+  ;; 反向: CCW [s,e] → CCW [a1-e, a1-s]; hand = nrm×u 的 z 分量, <0 即镜像。
   (setq a1 (angle '(0.0 0.0 0.0) nrm)
+        hand (- (* (nth 0 nrm) (nth 1 u)) (* (nth 1 nrm) (nth 0 u)))
         ents nil)
   (foreach e (dt:cx-yxb-tpl)
     (setq t1 (dt:cx-yxb-map-pt (nth 1 e) (nth 2 e) o u nrm))
@@ -1469,26 +1486,82 @@
        (setq ents (cons (vla-addarc (dt:ms)
                           (vlax-3d-point t1)
                           (nth 3 e)
-                          (+ (* pi (/ (nth 4 e) 180.0)) a1)
-                          (+ (* pi (/ (nth 5 e) 180.0)) a1))
+                          (if (< hand 0.0)
+                            (- a1 (* pi (/ (nth 5 e) 180.0)))
+                            (+ a1 (* pi (/ (nth 4 e) 180.0))))
+                          (if (< hand 0.0)
+                            (- a1 (* pi (/ (nth 4 e) 180.0)))
+                            (+ a1 (* pi (/ (nth 5 e) 180.0)))))
                         ents)))
       ((= (car e) "CIRCLE")
        (setq ents (cons (vla-addcircle (dt:ms) (vlax-3d-point t1) (nth 3 e)) ents)))))
   (foreach ent ents (vla-put-layer ent layer))
   (reverse ents))
 
+;; 内/外壁侧解析(v11.7, 用户需求: 曲折出线槽的左/右壁随各源线绘制方向
+;; 漂移, 同一圈会出现一半内一半外, 须整圈一致): 只对 "Inner"/"Outer"
+;; 生效, "Left"/"Right" 原样返回(直线出线槽沿用旧语义)。
+;; 判定: 与本源线"相连"的其他源线 —— 相交(dt:inters-pts 非空, 拐角画法)
+;; 或任一端头到对方曲线距离 ≤ 1.2×偏移(T 接画法; 平行的相邻通道 ≥ 2×
+;; 偏移不误入)。相连源线中点落在本源线哪一侧(Left/Right)投票, 多数侧 =
+;; 内壁侧(围合区/曲率中心一侧)。平票或无邻居(孤立直线, 内外无定义):
+;; 按内=左/外=右兜底并打印提示。返回 "Left"/"Right" 供 find-walls 使用。
+(defun dt:cx-yxb-resolve-side (all-lines src side slot-dist /
+                               ss2 ee2 oj mj sidev left right)
+  (if (not (member (strcase side) '("INNER" "OUTER")))
+    side
+    (progn
+      (setq ss2 (vlax-curve-getstartpoint src)
+            ee2 (vlax-curve-getendpoint src)
+            ss2 (list (nth 0 ss2) (nth 1 ss2) 0.0)
+            ee2 (list (nth 0 ee2) (nth 1 ee2) 0.0)
+            left 0 right 0)
+      (foreach oj all-lines
+        (if (and (/= (vla-get-handle oj) (vla-get-handle src))
+                 (or (dt:inters-pts src oj)
+                     (<= (min (distance ss2 (vlax-curve-getclosestpointto oj ss2))
+                              (distance ee2 (vlax-curve-getclosestpointto oj ee2))
+                              (distance (vlax-curve-getstartpoint oj)
+                                        (vlax-curve-getclosestpointto
+                                          src (vlax-curve-getstartpoint oj)))
+                              (distance (vlax-curve-getendpoint oj)
+                                        (vlax-curve-getclosestpointto
+                                          src (vlax-curve-getendpoint oj))))
+                          (* 1.2 slot-dist))))
+          (progn
+            (setq mj (vlax-curve-getpointatparam oj
+                       (/ (+ (vlax-curve-getstartparam oj)
+                             (vlax-curve-getendparam oj)) 2.0))
+                  sidev (- (* (- (nth 0 ee2) (nth 0 ss2)) (- (nth 1 mj) (nth 1 ss2)))
+                           (* (- (nth 1 ee2) (nth 1 ss2)) (- (nth 0 mj) (nth 0 ss2)))))
+            (cond
+              ((< (abs sidev) 1e-6) nil)   ; 共线邻居(重复画线)不投票
+              ((> sidev 0.0) (setq left (1+ left)))
+              (T (setq right (1+ right)))))))
+      (cond
+        ((and (= left 0) (= right 0))
+         (princ (strcat "\n【压线板】源线无相连源线, 内/外壁未定义, 按"
+                        (if (= (strcase side) "INNER") "左" "右") "壁处理。")))
+        ((= left right)
+         (princ "\n【压线板】内/外壁投票平票, 按内=左/外=右处理。")))
+      (if (= (strcase side) "INNER")
+        (if (>= left right) "Left" "Right")
+        (if (< left right) "Left" "Right")))))
+
 ;; 规划(v10.7 引入, v11.3 改逐直段): 每条源线选定侧的壁直段 -> (sp u n0 L)
 ;; 数据(一条壁可产多段)。sp = 段起点(与源线同向化后), u = 段方向单位向量,
 ;; n0 = 外侧法向, L = 段长。只收集数据不动图元; 放置在删源线后由
 ;; dt:cx-yxb-place 执行。无直段时打印自诊断(弧段/不平行/侧不符计数与
-;; 最近垂距偏差 —— 一眼看出差在哪个条件)。
+;; 最近垂距偏差 —— 一眼看出差在哪个条件)。v11.7: side 为 Inner/Outer 时
+;; 先经 dt:cx-yxb-resolve-side 逐源线解析成 Left/Right(整圈一致), 见上。
 (defun dt:cx-yxb-plan (center-lines slot-layer src-enames side slot-dist /
-                       plans src res pieces n-arc n-notpar n-side n-dist dmin
+                       plans src side-r res pieces n-arc n-notpar n-side n-dist dmin
                        p sp ep u n0 pA pB ss2 ee2 ds dl L tmp nsrc)
   (setq nsrc 0)
   (foreach src center-lines
     (setq nsrc (1+ nsrc)
-          res (dt:cx-yxb-find-walls src slot-layer src-enames side slot-dist)
+          side-r (dt:cx-yxb-resolve-side center-lines src side slot-dist)
+          res (dt:cx-yxb-find-walls src slot-layer src-enames side-r slot-dist)
           pieces (nth 0 res) n-arc (nth 1 res) n-notpar (nth 2 res)
           n-side (nth 3 res) n-dist (nth 4 res) dmin (nth 5 res))
     (if pieces
@@ -1839,8 +1912,10 @@
         (princ "\n【提示】图层 \"CX\" 不存在, 请先在该图层画好出线槽源线再运行。")
         (progn
           ;; v10.5: 压线板贴壁侧选择(每次运行时询问)
-          (initget "Left Right")
-          (setq yxb-side (getkword "\n压线板贴出线槽哪一侧? [左壁(L)/右壁(R)] <左壁>: "))
+          ;; v11.7: 增内壁(I)/外壁(O) —— 曲折出线槽按相连源线投票整圈一致
+          ;; 取侧; 左/右壁仍按单条源线方向(直线出线槽沿用)
+          (initget "Inner Outer Left Right")
+          (setq yxb-side (getkword "\n压线板贴出线槽哪一侧? [内壁(I)/外壁(O)/左壁(L)/右壁(R)] <左壁>: "))
           (if (null yxb-side) (setq yxb-side "Left"))
           (dt:cx-process "CX" "CX" cx-dist yxb-side)
           (princ "\n【完成】出线槽流程结束。")))))

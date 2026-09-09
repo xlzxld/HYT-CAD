@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""方向/排布算法回归(jrt v9.24/25 + cx v11.2/3) —— 纯 stdlib, 零依赖。
+"""方向/排布算法回归(jrt v9.24/25 + cx v11.2/3/7) —— 纯 stdlib, 零依赖。
 
 把 cx_runner/jrt_runner 中"与 AutoCAD 无关"的几何判定逻辑逐行移植为
 Python, 用图2/图3 场景与 tools/1.dxf 实测数据做断言:
@@ -17,6 +17,8 @@ Python, 用图2/图3 场景与 tools/1.dxf 实测数据做断言:
   12) v9.26 通道延伸     —— 壁"让开"3mm: ext=0 不交(复现日志), ext=5 命中
   13) v9.27 长线裁剪     —— 端点里外分类与起笔无关, 保留段不含板内点
   14) v9.27 短线回退     —— 两端同侧 → 分类弃权走 v9.22 启发式
+  15) v11.7 压线板弧角   —— 左壁镜像系弧角反向: 旧公式全断开/新公式闭合
+  16) v11.7 内/外壁解析  —— 相连源线中点多数侧=内侧(2.dxf 六源线复现)
 运行: python tools/test_direction.py ; 退出码 0=全过。
 """
 import math
@@ -176,6 +178,88 @@ def side_of(piece, ss, ds, side):
     m = mid_of(piece)
     cr = ds[0] * (m[1] - ss[1]) - ds[1] * (m[0] - ss[0])
     return cr > 0.0 if side == "LEFT" else cr < 0.0
+
+
+# ---------- 15) v11.7 压线板实例几何移植(dt:cx-yxb-draw) ----------
+YXB_TPL = (("LINE", 0.0, 0.0, 0.0, 16.6),
+           ("LINE", 0.0, 0.0, 11.0, 0.0),
+           ("LINE", 0.0, 16.6, 11.0, 16.6),
+           ("LINE", 15.3, 4.3, 15.3, 12.3),
+           ("ARC", 11.0, 4.3, 4.3, 270.0, 360.0),
+           ("ARC", 11.0, 12.3, 4.3, 0.0, 90.0))
+
+
+def yxb_map_pt(lx, ly, o, u, nrm):
+    return (o[0] + u[0] * ly + nrm[0] * lx,
+            o[1] + u[1] * ly + nrm[1] * lx)
+
+
+def yxb_plate_closed(u, nrm, o, formula):
+    """按 dt:cx-yxb-draw 移植生成 6 件, 返回 (闭合?, 弧端点未命中数)。
+    formula="old" = v11.6 及以前(弧角一律 +a1); "v117" = 镜像系反向。"""
+    a1 = math.atan2(nrm[1], nrm[0])
+    hand = nrm[0] * u[1] - nrm[1] * u[0]
+    line_ends, arc_ends, miss = [], [], 0
+    for e in YXB_TPL:
+        if e[0] == "LINE":
+            line_ends.append(yxb_map_pt(e[1], e[2], o, u, nrm))
+            line_ends.append(yxb_map_pt(e[3], e[4], o, u, nrm))
+        else:
+            c = yxb_map_pt(e[1], e[2], o, u, nrm)
+            r, s, en = e[3], e[4], e[5]
+            if formula == "old" or hand >= 0.0:
+                st, et = a1 + math.radians(s), a1 + math.radians(en)
+            else:
+                st, et = a1 - math.radians(en), a1 - math.radians(s)
+            sweep = (et - st) % (2.0 * math.pi)
+            for ang in (st, st + sweep):
+                arc_ends.append((c[0] + r * math.cos(ang),
+                                 c[1] + r * math.sin(ang)))
+    for p in arc_ends:
+        if not any(math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-6
+                   for q in line_ends):
+            miss += 1
+    return miss == 0, miss
+
+
+# ---------- 16) v11.7 内/外壁侧解析移植(dt:cx-yxb-resolve-side) ----------
+def segs_intersect(s1, s2):
+    def cr(o, p, q):
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+    (a, b), (c, d) = s1, s2
+    return (cr(a, b, c) * cr(a, b, d) <= 0
+            and cr(c, d, a) * cr(c, d, b) <= 0)
+
+
+def yxb_connected(s1, s2, slot_dist):
+    if segs_intersect(s1, s2):
+        return True
+    ends1 = [pt_seg_dist(p, s2[0], s2[1]) for p in s1]
+    ends2 = [pt_seg_dist(p, s1[0], s1[1]) for p in s2]
+    return min(ends1 + ends2) <= 1.2 * slot_dist
+
+
+def yxb_resolve_side(all_lines, src, side, slot_dist):
+    if side.upper() not in ("INNER", "OUTER"):
+        return side
+    ss, se = src[0], src[1]
+    ds = (se[0] - ss[0], se[1] - ss[1])
+    left = right = 0
+    for oj in all_lines:
+        if oj is src:
+            continue
+        if yxb_connected(src, oj, slot_dist):
+            m = ((oj[0][0] + oj[1][0]) / 2.0, (oj[0][1] + oj[1][1]) / 2.0)
+            sv = ds[0] * (m[1] - ss[1]) - ds[1] * (m[0] - ss[0])
+            if abs(sv) < 1e-6:
+                pass
+            elif sv > 0.0:
+                left += 1
+            else:
+                right += 1
+    if side.upper() == "INNER":
+        return "Left" if left >= right else "Right"
+    return "Left" if left < right else "Right"
 
 
 def main():
@@ -381,6 +465,61 @@ def main():
           out_end((316.5, 140.0), (316.5, 120.0), loop) is None)
     check("两端同在区域内 → 分类弃权",
           out_end((316.5, 600.0), (316.5, 500.0), loop) is None)
+
+    print("[15] v11.7 压线板弧角: 左壁镜像系旧公式断开 / 新公式闭合")
+    # 六个壁向取自 1/2.dxf 实测(左臂76.2° 顶174.3° 右臂94.2° 底左7.3°
+    # 底右179.6° 支路73.5°); 每向构造右壁(n=rot90cw(u))与左壁(n=rot90ccw(u))
+    # 两系 —— 与 plan 的外法向翻转结果一致。
+    for deg in (76.2, 174.3, 94.2, 7.3, 179.6, 73.5):
+        th = math.radians(deg)
+        u = (math.cos(th), math.sin(th))
+        o = (3033.4, 1402.8)
+        n_right = (u[1], -u[0])
+        n_left = (-u[1], u[0])
+        ok_or, _ = yxb_plate_closed(u, n_right, o, "old")
+        ok_nr, _ = yxb_plate_closed(u, n_right, o, "v117")
+        ok_ol, miss_l = yxb_plate_closed(u, n_left, o, "old")
+        ok_nl, _ = yxb_plate_closed(u, n_left, o, "v117")
+        check("壁向%.1f°: 右壁(右手系) 旧公式本就闭合" % deg, ok_or)
+        check("壁向%.1f°: 右壁 新公式不回归" % deg, ok_nr)
+        check("壁向%.1f°: 左壁(镜像系) 旧公式每弧1端点脱开(1.dxf 实测42/42)"
+              % deg, (not ok_ol) and miss_l == 2)
+        check("壁向%.1f°: 左壁 新公式闭合" % deg, ok_nl)
+
+    print("[16] v11.7 内/外壁侧解析: 2.dxf 六源线(∩形通道+支路)复现")
+    # 源线 = 2.dxf 通道壁对中线的重建(方向随偏移保向), 两端各延 40mm
+    # 复现用户拐角过交画法; 期望值 = 2.dxf 图上人工判定的围合区一侧。
+    def ext_seg(s, ext):
+        (ax, ay), (bx, by) = s
+        L = math.hypot(bx - ax, by - ay)
+        ux, uy = (bx - ax) / L, (by - ay) / L
+        return ((ax - ux * ext, ay - uy * ext), (bx + ux * ext, by + uy * ext))
+    src_map = [
+        ("左臂", ((3048.265, 1389.990), (3125.650, 1704.210)), "Right"),
+        ("顶段", ((3149.740, 1721.210), (3831.610, 1652.835)), "Right"),
+        ("右臂", ((3869.480, 1392.870), (3851.800, 1632.105)), "Left"),
+        ("底左腿", ((3289.270, 1390.185), (3072.990, 1362.295)), "Right"),
+        ("底右腿", ((3664.965, 1370.130), (3846.865, 1368.715)), "Left"),
+        ("支路", ((3608.645, 1707.855), (3641.690, 1819.440)), "Left"),
+    ]
+    lines6 = [ext_seg(s, 40.0) for _, s, _ in src_map]
+    for (name, _, want_in), src in zip(src_map, lines6):
+        got_in = yxb_resolve_side(lines6, src, "Inner", 17.5)
+        got_out = yxb_resolve_side(lines6, src, "Outer", 17.5)
+        check("%s: Inner → %s(围合区侧, 整圈一致)" % (name, want_in),
+              got_in == want_in)
+        check("%s: Outer → %s(Inner 反侧)" % (name,
+              "Left" if want_in == "Right" else "Right"),
+              got_out == ("Left" if want_in == "Right" else "Right"))
+    lone = [((0.0, 0.0), (0.0, 400.0))]
+    check("孤立直线 Inner → 兜底 Left", yxb_resolve_side(
+        lone, lone[0], "Inner", 17.5) == "Left")
+    check("孤立直线 Outer → 兜底 Right", yxb_resolve_side(
+        lone, lone[0], "Outer", 17.5) == "Right")
+    # 平行的无关通道(距 100 > 1.2×17.5)不参与投票: 仍走兜底
+    far = lone + [((100.0, 0.0), (100.0, 400.0))]
+    check("平行远通道不投票, Inner 仍兜底 Left", yxb_resolve_side(
+        far, far[0], "Inner", 17.5) == "Left")
 
     print()
     if FAIL:
