@@ -1,5 +1,5 @@
 ﻿;;; ============================================================================
-;;; dt_start.lsp  v3.2 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.3 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -36,6 +36,8 @@
 ;;;   主命令是否已定义, 缺失 = 半加载/旧会话残留(坑 #49 变体: 用户实测
 ;;;   jrt_runner 半加载后运行报 no function definition), 明确警告请完全
 ;;;   关闭 CAD 重开, 不再让错误潜伏到运行期。
+;;; v3.3  : 加载横幅并为一行并引用 dt:st-version(版本单一来源, 根治横幅
+;;;   版本号与头注脱节); 升级安装提示从加载横幅移至 DTINSTALL 完成输出。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -91,7 +93,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.2")     ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.3")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -667,7 +669,8 @@
          (setq p (dt:st-acadoc-path dir))
          (princ "\n【安装】完成: 钩子已写入 acaddoc.lsp(含确定性目录注入), 目录已加入支持/受信任路径。")
          (princ (strcat "\n【安装】钩子文件: " (if p p "(未定位)")))
-         (princ "\n【安装】以后开 CAD 自动加载全部脚本并挂出顶部菜单「热流道自动化(R)」; 本次会话已生效:"))
+         (princ "\n【安装】以后开 CAD 自动加载全部脚本并挂出顶部菜单「热流道自动化(R)」; 本次会话已生效:")
+         (princ "\n【安装】提示: 升级旧版本请先 DTUNINSTALL 清旧钩子再 DTINSTALL。"))
        (princ "\n【安装】警告: acaddoc.lsp 写入失败(权限?), 自启未生效; 本次会话仍可用。"))
      (dt:st-boot T)))
   (princ))
@@ -793,6 +796,6 @@
   (princ))
 
 ;;; 加载提示
-(princ "\ndt_start v3.2 已加载: DTINSTALL 安装自启 / DTRELOAD 刷新 / DTUNINSTALL 卸载 / DTDBG 诊断 / DTDEMO 演示记录。")
-(princ "\n安装后顶栏出现「热流道自动化(R)」菜单; (升级安装: 先 DTUNINSTALL 清旧钩子, 再 DTINSTALL。)")
+(princ (strcat "\ndt_start 已加载 " dt:st-version
+               ": DTINSTALL=安装自启 / DTRELOAD=刷新 / DTUNINSTALL=卸载 / DTDBG=诊断 / DTDEMO=演示。"))
 (princ)

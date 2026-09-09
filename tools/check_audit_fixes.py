@@ -265,6 +265,33 @@ def b09():
 check('B-09', 'flb *error* 撤销兜底 COM 化', b09)
 
 
+# ---------------------------------------------------------------------------
+# BANNER 加载横幅版本单一来源: 横幅曾长期硬编码版本号导致与头注脱节
+# (体检时 v9.29/v11.3/v10.6/v2.8 全部滞后)。断言: 四个 runner 均定义版本
+# 常量且横幅引用变量, 代码中不再出现 "已加载 v<数字>" 式硬编码。
+# ---------------------------------------------------------------------------
+def banners():
+    problems = []
+    specs = [('jrt_runner.lsp', '*dt-jrt-ver*'),
+             ('cx_runner.lsp', '*dt-cx-ver*'),
+             ('flb_runner.lsp', '*dt-flb-ver*'),
+             ('wx_runner.lsp', '*dt-wx-ver*')]
+    for fn, var in specs:
+        src = code_of(fn)
+        if var not in src:
+            problems.append('%s 缺版本常量 %s' % (fn, var))
+        if re.search(r'已加载 v\d', src):
+            problems.append('%s 横幅仍硬编码版本号' % fn)
+    dt = code_of('dt_start.lsp')
+    if '(strcat "\\ndt_start 已加载 " dt:st-version' not in dt:
+        problems.append('dt_start 横幅未引用 dt:st-version')
+    return not problems, ('; '.join(problems) if problems
+                          else '四个 runner + dt_start 横幅均走版本常量')
+
+
+check('BANNER', '加载横幅版本号单一来源(不再硬编码)', banners)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]
