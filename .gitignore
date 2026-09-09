@@ -24,6 +24,12 @@ __pycache__/
 *.dwg
 tools/*_out.dxf
 
+# 2.2 脚本配置与对话框(用户定案 2026-09-09 不入库: ini/dcl 均为运行生成物
+#     —— cx/flb/jrt 的 ini 与 dcl 由脚本启动/弹框时自动再生, mem ini 为
+#     参数记忆; wx ini 仅被读取, 缺失时回退代码内置默认值。本机文件保留)
+*.ini
+*.dcl
+
 # 3. 操作系统与文件管理器产物
 Thumbs.db
 ehthumbs.db
