@@ -20,7 +20,12 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.10
+;;; 版本: v2.11
+;;; v2.11 : 全图层配色重排(用户需求, 与 flb v10.11 同批): FLB_BOX 130→42
+;;;         (赭黄), 数据图纸 7→63(橄榄绿), 外协文字 7→144(深青), JD 7→101
+;;;         (薄荷绿), 外协包络盒 3→222(紫红), ZJJ 210→193(灰紫); ensure-
+;;;         layer 已存在图层也校正为登记色(老图重跑自动换新色)。逻辑零变化。
+;;;         新增回归 tools/check_layer_colors.py。
 ;;; v2.10 : 加载横幅精简为一行 + 新增 *dt-wx-ver* 版本单一来源(根治横幅
 ;;;         版本号长期滞后, 本次 v2.8 → v2.10 追平)。
 ;;; v2.9  : 体检B-01/B-02/B-05/B-06/B-11/B-12 六项修复:
@@ -85,7 +90,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.10")
+(setq *dt-wx-ver* "v2.11")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -120,6 +125,7 @@
   (reverse lst))
 
 ;; 保证图层存在, 若不存在则创建; 若大小写不一致则自动纠正(坑 #29)
+;; v2.11: 已存在图层也把颜色校正为登记值(全图层配色重排, 老图自动刷新)。
 (defun dt:ensure-layer (layers name color cname / obj ent actual)
   (setq ent (tblsearch "LAYER" name))
   (if (null ent)
@@ -134,7 +140,11 @@
         (progn
           (vl-catch-all-apply 'vla-put-name (list (vla-item layers actual) name))
           (princ (strcat "\n图层 \"" actual "\" 已改名为 \"" name "\"。"))))
-      (princ (strcat "\n图层 \"" name "\" 已存在, 直接使用(不修改其属性)。"))
+      (setq obj (vl-catch-all-apply 'vla-item (list layers name)))
+      (if (and (not (vl-catch-all-error-p obj)) obj
+               (/= (vl-catch-all-apply 'vla-get-color (list obj)) color))
+        (vla-put-color obj color))
+      (princ (strcat "\n图层 \"" name "\" 已存在, 颜色已对齐登记值(" cname ")。"))
       nil)))
 
 ;; vla-getboundingbox 在不同 CAD 版本/运行上下文下, 传出值可能是 variant
@@ -528,8 +538,8 @@
         doc    (vla-get-activedocument acad)
         layers (vla-get-layers doc)
         ms     (vla-get-modelspace doc))
-  ;; 1) 保证 FLB_BOX 图层存在(浅青 130, 避免与螺丝孔 4 冲突)
-  (dt:ensure-layer layers "FLB_BOX" 130 "浅青")
+  ;; 1) 保证 FLB_BOX 图层存在(赭黄 42, v2.11 重排避免与螺丝孔青 4 相近)
+  (dt:ensure-layer layers "FLB_BOX" 42 "赭黄")
 
   ;; 2) 绘制包络矩形(轻量多段线)
   (setq pts (vlax-make-safearray vlax-vbDouble '(0 . 7)))
@@ -1036,7 +1046,7 @@
           (setq ms-tgt (vla-get-modelspace tgt-doc))
           ;; 确保文字样式与专用图层在目标图纸中准确就绪
           (dt:sz-ensure-style tgt-doc)
-          (dt:sz-ensure-doc-layer tgt-doc "外协文字" 7)
+          (dt:sz-ensure-doc-layer tgt-doc "外协文字" 144)
           (if target-layer
             (dt:sz-ensure-doc-layer tgt-doc target-layer 1)
             (progn
@@ -1046,7 +1056,7 @@
               (dt:sz-ensure-doc-layer tgt-doc "DK" 8)
               (dt:sz-ensure-doc-layer tgt-doc "JRT" 2)
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
-              (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 210)))
+              (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 193)))
 
           ;; 3) v2.6 网格排版(纯几何推导): 单位标记 = "外协文字"层 MText(每幅
           ;;    恰好 1 个, 同时缓存各自 bbox)。当前行 = 插入点 Y 最小的文字组;
@@ -1176,8 +1186,8 @@
                   ;; 静默失败 = "图形没移动"根因)
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "JD" 7)
-                      (dt:sz-ensure-doc-layer cur-doc "JD" 7)
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 101)
+                      (dt:sz-ensure-doc-layer cur-doc "JD" 101)
                       ;; v2.9: 实参改 cur-doc —— 实体此刻还是 cur-doc 的临时
                       ;; 克隆(CopyObjects 在 4e 步才发生), 查 ByLayer 实体的
                       ;; "原图层色"必须查源侧; 传 tgt-doc 查到的是目标图刚被
@@ -1226,7 +1236,7 @@
                   ;; 6.5) v2.8 精雕: 目标图中原 FLB 系图层实体并入 JD 层并删原层
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "JD" 7)
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 101)
                       (setq migrated (dt:sz-migrate-layers
                                        tgt-doc "JD"
                                        (list "FLB" "LS" "RZ" "DK" "JRT" "DP" "ZJJ")))
@@ -1257,10 +1267,10 @@
                     (if (vl-catch-all-error-p txt-obj)
                       (princ (strcat "\n【" title "】生成标注文字警告: " (vl-catch-all-error-message txt-obj)))))
 
-                  ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 绿色 3)
+                  ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 紫红 222)
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 3)
+                      (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 222)
                       (setq txt-bb (if (and txt-obj (not (vl-catch-all-error-p txt-obj)))
                                      (dt:rect-bbox (list txt-obj)))
                             bx1 (- ins-x 20.0)
@@ -1281,8 +1291,8 @@
                         (progn
                           (vla-put-closed box-obj :vlax-true)
                           ;; v2.4: 实体级颜色 —— 非活动文档的图层色显示不即时生效(同字体坑),
-                          ;; 实体色优先, 首幅即显绿色
-                          (vla-put-color box-obj 3)
+                          ;; 实体色优先, 首幅即显紫红
+                          (vla-put-color box-obj 222)
                           (vla-put-layer box-obj "外协包络盒"))
                         (princ "\n【精雕】包络盒生成警告(工件本身不受影响)。"))))
 
@@ -1546,8 +1556,8 @@
           (setq undo-started T)
           (vl-catch-all-apply 'vla-startundomark (list doc))
 
-          ;; 确保专用隔离图层 "数据图纸" 存在(白色 7)
-          (dt:ensure-layer (vla-get-layers doc) "数据图纸" 7 "白色")
+          ;; 确保专用隔离图层 "数据图纸" 存在(橄榄绿 63, v2.11 重排避免与 LD 白 7 同色)
+          (dt:ensure-layer (vla-get-layers doc) "数据图纸" 63 "橄榄绿")
 
           ;; 克隆图元并移动至目标位置，全部置入新图层 "数据图纸" (防止干扰 FLB 尺寸测量)
           (setq new-objs nil)
@@ -1607,7 +1617,7 @@
                             "日期：" date-str))
 
               (dt:sz-ensure-style doc)
-              (dt:ensure-layer (vla-get-layers doc) "外协文字" 7 "白色")
+              (dt:ensure-layer (vla-get-layers doc) "外协文字" 144 "深青")
 
               (setq x-label (+ maxx 30.0)
                     y-top   maxy

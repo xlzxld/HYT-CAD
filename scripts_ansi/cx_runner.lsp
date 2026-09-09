@@ -1,5 +1,9 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.7
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.8
+;;; v11.8  : 全图层配色重排(用户需求, 与 flb v10.11 同批): CXK 150→122
+;;;          (青绿), YXB 4→84(深绿, 与 LS 青 4 区分); 两处内联建层对已
+;;;          存在图层也把颜色校正为登记值(老图重跑自动换新色)。几何零变化。
+;;;          新增回归 tools/check_layer_colors.py(全脚本图层色唯一且色差达标)。
 ;;; v11.7  : 压线板两项修复(用户实测 1/2.dxf+png):
 ;;;          ①左壁畸形根治: dt:cx-yxb-draw 的本地映射(+X→外法向 nrm,
 ;;;            +Y→壁向 u)在左壁侧(nrm=rot90ccw(u), 外法向未翻转)是
@@ -115,7 +119,7 @@
 ;;; 来源   : 自 flb_runner v9.x 的出线槽链独立而来(几何逻辑与 v8.16 起
 ;;;          一脉相承, 零改动), 可与主脚本(分流板)分开单独加载, 同时加载
 ;;;          互不影响(参数表/对话框/dcl 文件/回调函数均已改名隔离)。
-;;; 图层   : "CX" = 出线槽(源线 + 通道壁同层, 蓝色 5); 源线由用户绘制,
+;;; 图层   : "CX" = 出线槽(源线 + 通道壁同层, 浅蓝 161); 源线由用户绘制,
 ;;;          脚本不删。v9.1 起图层名由中文"出线槽"改为拼音缩写 "CX"。
 ;;; 加载   : APPLOAD 选择本文件加载(cx_runner.dcl 由脚本自动生成)。
 ;;; 命令   : SLOT      —— 弹出参数框, 确定后执行出线槽全流程(取消中止)
@@ -128,7 +132,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-cx-ver* "v11.7")
+(setq *dt-cx-ver* "v11.8")
 
 ;; ============================================================================
 ;; 出线槽参数 —— 由 dt:cx-param-table 驱动(默认值/预填/应用/恢复默认),
@@ -1256,7 +1260,7 @@
 ;; 当点用导致崩溃。参与了接头的壁端头已被延长/收头/圆角移动(距源线端点
 ;; ≥22, 实测), 不满足距离条件, 自然不会被误封。
 ;; v9.9: 收尾调 dt:cx-cxk —— 距 DP(垫片)层对象最远的一条封闭线移入
-;; "CXK"图层(蓝色 5, 与 CX 同色, 供下游区分出线口)。
+;; "CXK"图层(青绿 122, 供下游区分出线口)。
 (defun dt:cx-close (layer center-lines slot-dist /
                       ends P cand e a pair p1 p2 done-pairs ln count tol closers
                       cl)
@@ -1321,7 +1325,7 @@
   (princ))
 
 ;; CXK 分流(v9.9): 封闭线中距 DP(垫片)层对象**最远的一条**移入新图层
-;; "CXK"(蓝色 5, 与 CX 同色, 供下游区分出线口)。距离 = 封闭线 3 采样点
+;; "CXK"(青绿 122, 供下游区分出线口)。距离 = 封闭线 3 采样点
 ;; (起点/中点/终点)到各 DP 对象最近点的最小值(几何边缘距离, 圆/线/弧
 ;; 通用)。DP 层不存在或为空 → 提示并跳过(全部封闭线留在 CX, SLOT 可
 ;; 独立运行); 只有 1 条封闭线时规则照常成立(它即最远, 仍移入)。
@@ -1351,13 +1355,17 @@
      (if (null best)
        (princ "\n【出线槽】警告: 垫片对象无法测距, 封闭线全部留在\"CX\"层。")
        (progn
-         ;; 创建 CXK 图层(已存在则直接使用)
+         ;; 创建 CXK 图层(已存在则把颜色校正为登记值 122, v11.8 配色统一)
          (setq layers (vla-get-layers (vla-get-activedocument (vlax-get-acad-object))))
          (if (null (tblsearch "LAYER" "CXK"))
            (progn
              (setq lay (vla-add layers "CXK"))
-             (vla-put-color lay 150)
-             (princ "\n【出线槽】已创建新图层 \"CXK\" (亮蓝, 放距 DP 最远的封闭线)。")))
+             (vla-put-color lay 122)
+             (princ "\n【出线槽】已创建新图层 \"CXK\" (青绿, 放距 DP 最远的封闭线)。"))
+           (progn
+             (setq lay (vla-item layers "CXK"))
+             (if (/= (vla-get-color lay) 122)
+               (vla-put-color lay 122))))
          (vla-put-layer best "CXK")
          (princ (strcat "\n【出线槽】距 DP 最远的封闭线(距离 " (rtos best-d 2 2)
                         ")已移入\"CXK\"图层。"))))))
@@ -1625,10 +1633,15 @@
      (setq doc (vla-get-activedocument (vlax-get-acad-object)))
      ;; v11.2: 内联建层(原调 dt:ensure-layer —— 本文件并未定义该函数,
      ;;        单独 APPLOAD cx_runner 运行到此必报 no function definition)
+     ;; v11.8: 颜色 4→84(深绿, 与 LS 青 4 区分); 已存在也校正为登记值
      (if (null (tblsearch "LAYER" "YXB"))
        (progn
          (setq lay (vla-add (vla-get-layers doc) "YXB"))
-         (vla-put-color lay 4)))
+         (vla-put-color lay 84))
+       (progn
+         (setq lay (vla-item (vla-get-layers doc) "YXB"))
+         (if (/= (vla-get-color lay) 84)
+           (vla-put-color lay 84))))
      (setq n-old 0)
      (foreach o (dt:layer-vlas "YXB")
        (vl-catch-all-apply 'vla-delete (list o))

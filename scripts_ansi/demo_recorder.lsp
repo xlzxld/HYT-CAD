@@ -118,7 +118,7 @@
 
 ;; 监视图层(热流道相关层, INIT 清单与未来过滤用)
 (defun demo:watch-p (ly)
-  (member ly (list "JRT" "JRTDW" "FLB" "LS" "DK" "JT" "RZ" "ZJJ"
+  (member ly (list "JRT" "JRTDW" "JRTFBX" "FLB" "LS" "DK" "JT" "RZ" "ZJJ"
                    "DP" "CX" "JTFBX" "FBX")))
 
 ;; 全库句柄快照(will-start 调用): (句柄 类型 图层) 列表

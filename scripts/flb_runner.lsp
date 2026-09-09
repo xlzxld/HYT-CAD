@@ -1,6 +1,14 @@
 ﻿;;; ============================================================================
 ;;; 程序名 : 流道线双向偏移 + 区域裁剪 + 断口圆角 + 通道封口 + 螺丝孔定位
-;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.10
+;;;          + 封口倒角 + 分流板假体 + 参数对话框工具 (flb_runner.lsp)  v10.11
+;;; v10.11 : 全图层配色重排 + 预建清单扩为 15 层(用户需求): ①新图层
+;;;          "JRTFBX"(加热条封闭线, 浅橙 21, 归 jrt_runner 画, OFF 仅预建;
+;;;          jrt v9.34 起封闭线画该层); ②重排易混色: JRTDW 40→61,
+;;;          JTFBX 70→230, ZJJ 210→193(旧 210 与 JT 6 在 AutoCAD 现行
+;;;          调色板同显洋红), CX 140→161, CXK 150→122; ③dt:ensure-layer
+;;;          已存在图层也把颜色校正为登记值(老图重跑自动换新色);
+;;;          ④新增回归 tools/check_layer_colors.py(全脚本图层色唯一且
+;;;          两两色差达标, 防多脚本分头写色漂移)。几何流程零变化。
 ;;; v10.10 : 加载横幅 10 行精简为一行(命令教学移出加载期; 子流程单独调用
 ;;;          等高级用法见 README_CAD.md) + 新增 *dt-flb-ver* 版本单一来源
 ;;;          (根治横幅版本号长期滞后, 本次 v10.6 → v10.10 追平)。
@@ -68,20 +76,22 @@
 ;;;             同心点孔半径(默认3)圆 → "DK"(白); 另预留 "DP" 垫片层(蓝);
 ;;;          9) 出线槽已独立: v9.0 起出线槽拆分为独立脚本 cx_runner
 ;;;             (命令 SLOT/SLOTPARAM), 本脚本不再处理出线槽。
-;;; 图层约定(v9.4 起用拼音缩写, 中英对照; v9.7 起 OFF 预建全部 13 层):
+;;; 图层约定(v9.4 起用拼音缩写, 中英对照; v10.11 起 OFF 预建全部 15 层):
 ;;;   "LD"    = 流道线(源中心线图层, 用户画; OFF 预建空层属正常)
 ;;;   "FLB"   = 分流板轮廓线(红色)
 ;;;   "FBX"   = 封闭线(封口线/倒角斜线的流程临时层, 绿色; 收尾并入 FLB 后移除)
 ;;;   "LS"    = 螺丝孔圆(青色)
 ;;;   "JT"    = 分流板假体轮廓线(洋红, 前称"分流板挖孔")
-;;;   "JTFBX" = 假体封闭线(封口线/圆角弧的流程临时层, 黄色; 收尾并入 JT 后移除)
+;;;   "JTFBX" = 假体封闭线(封口线/圆角弧的流程临时层, 玫红 230; 收尾并入 JT 后移除)
 ;;;   "RZ"    = 热咀圆(橙色)
-;;;   "DK"    = 点孔圆(白色, 与热咀圆同心)
+;;;   "DK"    = 点孔圆(灰色 8, 与热咀圆同心)
 ;;;   "DP"    = 垫片(蓝色, 预留层: 只创建不自动绘制, 不参与重跑清理)
-;;;   "CX"    = 出线槽(归独立脚本 cx_runner 管理)
-;;;   "CXK"   = 出线口(蓝色, slot v9.9 分流产物层: 距 DP 最远的封闭线)
+;;;   "CX"    = 出线槽(浅蓝 161, 归独立脚本 cx_runner 管理)
+;;;   "CXK"   = 出线口(青绿 122, slot v9.9 分流产物层: 距 DP 最远的封闭线)
 ;;;   "JRT"   = 加热条(黄色, 归独立脚本 jrt_runner 管理)
-;;;   "JRTDW" = 加热条定位(黄色, jrt 通用二模板出线口位置标记, 用户画定位线)
+;;;   "JRTDW" = 加热条定位(浅黄绿 61, jrt 通用二模板出线口位置标记, 用户画定位线)
+;;;   "JRTFBX"= 加热条封闭线(浅橙 21, jrt v9.34 封闭线产物层, OFF 仅预建)
+;;;   "ZJJ"   = 主进胶圆(灰紫 193, v10.8 自动生成)
 ;;; 加载   : APPLOAD 选择本文件加载(flb_runner.dcl 由脚本自动生成,
 ;;;          无需手工准备)。
 ;;; 运行   : 加载后在命令行输入 OFF 并回车, 弹出参数对话框, 确认后全程
@@ -190,7 +200,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-flb-ver* "v10.10")
+(setq *dt-flb-ver* "v10.11")
 
 ;; ============================================================================
 ;; 全局参数(v8.0 新增) —— 可由参数对话框(命令 PARAM, 或 OFF 弹出)修改
@@ -1593,7 +1603,8 @@
                         (vlax-3d-point (list x2 y2 0.0))))
   (vla-put-layer ln layer)
   ln)
-;; 确保图层存在: 不存在则创建并设颜色; 已存在则不改属性(返回新建对象或 nil)。
+;; 确保图层存在: 不存在则创建并设颜色; 已存在则把颜色校正为登记色
+;; (v10.11 起配色统一: 各脚本登记表同值, 每次运行对齐, 老图自动刷新色)。
 ;; v9.5: AutoCAD 图层名不区分大小写 —— 若已存在图层与请求写法大小写不一致
 ;;       (如已有小写 "dp"), 自动改名为请求写法("DP"), 图上对象全部跟随。
 (defun dt:ensure-layer (layers name color cname / obj ent actual)
@@ -1610,7 +1621,11 @@
         (progn
           (vl-catch-all-apply 'vla-put-name (list (vla-item layers actual) name))
           (princ (strcat "\n图层 \"" actual "\" 已改名为 \"" name "\"。"))))
-      (princ (strcat "\n图层 \"" name "\" 已存在, 直接使用(不修改其属性)。"))
+      (setq obj (vl-catch-all-apply 'vla-item (list layers name)))
+      (if (and (not (vl-catch-all-error-p obj)) obj
+               (/= (vl-catch-all-apply 'vla-get-color (list obj)) color))
+        (vla-put-color obj color))
+      (princ (strcat "\n图层 \"" name "\" 已存在, 颜色已对齐登记值(" cname ")。"))
       nil)))
 
 ;; 删除指定图层上的所有对象(保留图层定义), 用于 OFF 重跑时清除上一轮产物
@@ -2152,12 +2167,12 @@
   (foreach s snap
     (dt:rect-addcircle (list (car s) (cadr s) 0.0) (caddr s) layer)))
 
-;; 检测 DP 图层上的圆并在其圆心创建主进胶圆 (R=*dt-zjj-r*, 默认 14.35, 图层 ZJJ, 颜色 210 紫色)
+;; 检测 DP 图层上的圆并在其圆心创建主进胶圆 (R=*dt-zjj-r*, 默认 14.35, 图层 ZJJ, 颜色 193 灰紫)
 (defun dt:flb-process-zjj ( / doc layers ss i e obj cen c-obj zjj-count)
   (setq doc (vla-get-activedocument (vlax-get-acad-object))
         layers (vla-get-layers doc)
         zjj-count 0)
-  (dt:ensure-layer layers "ZJJ" 210 "紫色")
+  (dt:ensure-layer layers "ZJJ" 193 "灰紫")
   (setq ss (ssget "X" '((8 . "DP") (0 . "CIRCLE"))))
   (if ss
     (progn
@@ -2297,16 +2312,17 @@
                            corners nl ls-count cham x0l x1r cy ld-del l c s)
   (setq doc (vla-get-activedocument (vlax-get-acad-object))
         layers (vla-get-layers doc))
-  ;; 1) 建全部 14 层(与通用模板一致, 空图跑一次也能建齐, 颜色无重复)
+  ;; 1) 建全部 15 层(与通用模板一致, 空图跑一次也能建齐, 颜色无重复)
   (foreach l (list (list "LD" 7 "白色") (list "FLB" 1 "红色")
                    (list "FBX" 3 "绿色") (list "LS" 4 "青色")
-                   (list "JT" 6 "洋红") (list "JTFBX" 70 "黄绿")
+                   (list "JT" 6 "洋红") (list "JTFBX" 230 "玫红")
                    (list "RZ" 30 "橙色") (list "DK" 8 "灰色")
-                   (list "DP" 5 "蓝色") (list "CX" 140 "天蓝")
-                   (list "CXK" 150 "亮蓝") (list "JRT" 2 "黄色")
-                   (list "JRTDW" 40 "橙黄") (list "ZJJ" 210 "紫色"))
+                   (list "DP" 5 "蓝色") (list "CX" 161 "浅蓝")
+                   (list "CXK" 122 "青绿") (list "JRT" 2 "黄色")
+                   (list "JRTDW" 61 "浅黄绿") (list "JRTFBX" 21 "浅橙")
+                   (list "ZJJ" 193 "灰紫"))
     (dt:ensure-layer layers (car l) (cadr l) (caddr l)))
-  (princ "\n【矩形】已预建全部 14 个图层(LD/FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW/ZJJ)。")
+  (princ "\n【矩形】已预建全部 15 个图层(LD/FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW/JRTFBX/ZJJ)。")
   ;; 2) LD 对象与整体范围
   (setq ss (ssget "X" (list (cons 8 "LD"))))
   (if (null ss)
@@ -2434,22 +2450,24 @@
             close-layer "FBX"      ; 分流板封口线/倒角斜线图层(绿色)
             screw-layer "LS"        ; 螺丝孔圆图层(青色)
             hole-layer  "JT"  ; 假体偏移线图层(洋红, v7.7新增)
-            hole-close-layer "JTFBX" ; 假体封口线/圆角图层(黄色, v7.7新增)
+            hole-close-layer "JTFBX" ; 假体封口线/圆角图层(玫红 230, v7.7新增)
             offset-dist *dt-offset-dist*  ; 分流板偏移距离(全局参数, 可对话框改)
             hole-dist   *dt-hole-dist*    ; 假体偏移距离(全局参数)
             hole-extend *dt-hole-extend*  ; 假体线端头延长量(全局参数)
       )
       ;; ------------------------------------------------------------------
       ;; 第 1 步: 创建全部图层(v9.7: 预建三脚本所有图层, 空图跑 OFF 也能
-      ;; 一次建齐; 已存在则不改属性, 同名小写自动纠正为大写)。
-      ;; 产物层: FLB(红)/LS(青)/JT(洋红)/RZ(橙)/DK(白);
-      ;; 流程临时层: FBX(绿)/JTFBX(黄), 收尾并入目标层后移除;
+      ;; 一次建齐; v10.11 起已存在图层也把颜色校正为登记值, 同名小写自动
+      ;; 纠正为大写)。
+      ;; 产物层: FLB(红)/LS(青)/JT(洋红)/RZ(橙)/DK(灰);
+      ;; 流程临时层: FBX(绿)/JTFBX(玫红), 收尾并入目标层后移除;
       ;; 预留层: DP 垫片(蓝, 只建层不自动画, 不参与清理);
       ;; 源线层: LD 流道中心线(白, 用户画);
-      ;; 跨脚本预建层: CX 出线槽(蓝, slot 源线层)/CXK 出线口(蓝, slot
-       ;; 分流产物层)/JRT 加热条(黄)/JRTDW 加热条定位(黄, jrt 通用二
-       ;; 出线口位置标记)。颜色与 slot/jrt 各自建层时一致, ensure-layer 对已
-      ;; 存在图层不改任何属性, 与另两脚本谁先建都不冲突。
+      ;; 跨脚本预建层: CX 出线槽(浅蓝, slot 源线层)/CXK 出线口(青绿, slot
+       ;; 分流产物层)/JRT 加热条(黄)/JRTDW 加热条定位(浅黄绿, jrt 通用二
+       ;; 出线口位置标记)/JRTFBX 加热条封闭线(浅橙, jrt v9.34 封闭线产物)。
+       ;; 颜色以本登记表为准(v10.11 全图层配色重排), 各脚本建层时对齐同一
+      ;; 张表(check_layer_colors.py 门禁防漂移)。
       ;; ------------------------------------------------------------------
       (setq doc    (vla-get-activedocument (vlax-get-acad-object))
             layers (vla-get-layers doc))
@@ -2458,15 +2476,16 @@
                        (list close-layer 3 "绿色")
                        (list screw-layer 4 "青色")
                        (list hole-layer 6 "洋红")
-                       (list hole-close-layer 70 "黄绿")
+                       (list hole-close-layer 230 "玫红")
                        (list "RZ" 30 "橙色")
                        (list "DK" 8 "灰色")
                        (list "DP" 5 "蓝色")
-                       (list "CX" 140 "天蓝")
-                       (list "CXK" 150 "亮蓝")
+                       (list "CX" 161 "浅蓝")
+                       (list "CXK" 122 "青绿")
                        (list "JRT" 2 "黄色")
-                       (list "JRTDW" 40 "橙黄")
-                       (list "ZJJ" 210 "紫色"))
+                       (list "JRTDW" 61 "浅黄绿")
+                       (list "JRTFBX" 21 "浅橙")
+                       (list "ZJJ" 193 "灰紫"))
         (dt:ensure-layer layers (car l) (cadr l) (caddr l)))
       ;; ----------------------------------------------------------------
       ;; 第 2 步: 一次性选中"LD"图层上的全部对象(覆盖全图, 无需逐个选择)
