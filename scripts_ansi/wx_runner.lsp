@@ -20,7 +20,21 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.13
+;;; 版本: v2.14
+;;; v2.14 : 修 v2.13 实测缺陷(用户截图: 同一行各幅 Y 乱飘 + 永不换行):
+;;;         根因 = v2.13 用"目标图里 MText 的 boundingbox"算行顶/行右缘, 而
+;;;         AutoCAD 对**非活动文档**中刚 CopyObjects 过去的 MText, 实体范围
+;;;         (boundingbox)不可靠(与本项目已知的"非活动文档图层色/字体不即时
+;;;         生效"同一类坑) —— 实测把行顶算低 86mm: 每幅 Y 偏移 → 下一幅文字
+;;;         插入点 Y 与上一幅差 >1mm → 行判定失效(grid-col 恒 1) → 永不换行,
+;;;         6 幅全挤一行且 Y 乱跳。
+;;;         修法: 排版基准只取"可靠源" ——
+;;;           · 行判定 / 行内容顶: "外协文字"插入点(属性直读, 可靠;
+;;;             插入点 = 文字底边 = 内容顶 + text_gap)
+;;;           · 行右缘 / 内容最底缘: 内容实体 bbox(线框数据, 可靠)
+;;;           · 单元盒尺寸: 在当前图量(可靠, 见 4f)
+;;;         并把"换行起点"由固定 x=0 改为对齐已有内容左缘(往任何图里追加
+;;;         都不会出现阶梯错位)。头注以下 v2.13 条目保留作版本账。
 ;;; v2.13 : 排版间距根治(用户需求, 四项):
 ;;;         ①精雕包络盒间距四向统一 —— 旧版盒定义不对称(左/下 20, 上=文字顶
 ;;;           +20), 实测横向净距 = box_gap-20、纵向 = 50+文字高-box_gap(略
@@ -113,7 +127,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.13")
+(setq *dt-wx-ver* "v2.14")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -974,20 +988,20 @@
                   maxy (if maxy (max maxy (cadr p)) (cadr p))))))))
   (if (and minx miny maxx maxy) (list minx miny maxx maxy) nil))
 
-;; v2.13: 由几何反推"当前行"单元盒右缘 —— 本次会话首幅 / 换目标图后无会话游标
-;; 时的定位兜底。基准 = max(本行文字右缘, 本行内容右缘) + box_margin。
-;; 本行内容判定: bbox maxY <= row-top(本行盒顶) —— 行上方各幅的内容底边必高于
-;; 本行盒顶(相隔 box_gap+box_margin), 故该过滤恰为本行, 与图形高度无关。
-;; 根治 v2.11 缺陷: 旧兜底直接拿"文字 maxx"当基准, 文字居中且宽钳 <=220,
-;; 比工件窄时基准偏小 → 相邻两幅间距忽大忽小(实测 10 幅里 1 幅不同)。
-(defun dt:sz-row-right (doc row-texts row-top margin / ms n i o lay bb right rec)
+;; v2.13 起: 由内容几何反推"当前行"单元盒右缘 —— 本次会话首幅 / 换目标图后无
+;; 会话游标时的定位兜底。基准 = 本行内容的 maxX + box_margin(只取内容实体,
+;; 不读文字 bbox —— 见 v2.14 头注: 非活动文档里 MText 的 boundingbox 不可靠)。
+;; ctop = 本行"内容顶"(由本行文字插入点 Y - text_gap 得到, 可靠):
+;; bbox maxY <= ctop 即本行内容 —— 行上方各幅的内容底边必高于本行内容顶
+;; (相隔 box_gap + 2×box_margin), 故该过滤恰为本行, 与图形高度无关。
+;; 根治 v2.11 缺陷: 旧兜底拿"文字 maxx"当基准, 文字居中且宽钳 <=220, 比工件
+;; 窄时基准偏小 → 相邻两幅间距忽大忽小(实测 10 幅里 1 幅不同)。
+;; 注: 文字比工件宽时本估计会略小(仅影响无游标的那一幅), 属已知取舍。
+(defun dt:sz-row-right (doc ctop margin / ms n i o lay bb right)
   (setq ms (vla-get-modelspace doc)
         n  (vla-get-count ms)
         i  0
         right nil)
-  (foreach rec row-texts
-    (if (cadr rec)
-      (setq right (if right (max right (caddr (cadr rec))) (caddr (cadr rec))))))
   (while (< i n)
     (setq o (vla-item ms i)
           i (1+ i))
@@ -996,7 +1010,7 @@
              (not (member (strcase lay) '("外协文字" "外协包络盒"))))
       (progn
         (setq bb (dt:rect-bbox (list o)))
-        (if (and bb (<= (cadddr bb) (+ row-top 1.0)))
+        (if (and bb (<= (cadddr bb) (+ ctop 1.0)))
           (setq right (if right (max right (caddr bb)) (caddr bb)))))))
   (if right (+ right margin) nil))
 
@@ -1080,8 +1094,8 @@
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
                             box-gap per-row text-gap box-margin
-                            grid-n grid-col txt-list txt-infos txt-min-y ip-t ti txt-bb migrated
-                            unit-w ax unit-bb ub-w ub-h row-texts row-top
+                            grid-n grid-col txt-list txt-infos txt-min-y ip-t ti migrated
+                            unit-w ax unit-bb ub-w ub-h row-ctop
                             first-p x0 by0 bx1 by1 bx2 by2 dx dy box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
@@ -1143,33 +1157,27 @@
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
               (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 193)))
 
-          ;; 3) v2.13 排版基准(几何 + 文字双锚, 不依赖会话状态):
-          ;;    单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin; 相邻单元盒净距 =
-          ;;    box_gap(上下左右同一值); 文字底边距图形最小包络盒顶边 =
-          ;;    text_gap。"当前行" = "外协文字"插入点 Y 最小的那一行
-          ;;    (同行各幅共享行顶, 见 4g 的 by0 回填)。
+          ;; 3) v2.14 排版基准 —— 只取"可靠源"(非活动目标文档里 MText 的
+          ;;    boundingbox 不可靠, 见头注 v2.14):
+          ;;      · 行判定 / 行内容顶: "外协文字"插入点(属性直读, 可靠;
+          ;;        插入点 = 文字底边 = 内容顶 + text_gap)
+          ;;      · 行右缘 / 内容最底缘: 内容实体 bbox(线框数据, 可靠)
+          ;;      · 单元盒尺寸: 在当前图里量(可靠, 见 4f)
           (setq txt-list (dt:sz-doc-texts tgt-doc "外协文字")
                 grid-n   (length txt-list)
                 grid-col 0
                 txt-infos nil
-                txt-min-y 1e99
-                row-texts nil
-                row-top nil)
+                txt-min-y 1e99)
           (foreach o txt-list
             (setq ip-t (vlax-safearray->list
-                         (vlax-variant-value (vla-get-insertionpoint o)))
-                  txt-bb (dt:rect-bbox (list o)))
-            (setq txt-infos (cons (list (cadr ip-t) txt-bb) txt-infos))
+                         (vlax-variant-value (vla-get-insertionpoint o))))
+            (setq txt-infos (cons (cadr ip-t) txt-infos))
             (if (< (cadr ip-t) txt-min-y) (setq txt-min-y (cadr ip-t))))
           (foreach ti txt-infos
-            (if (< (abs (- (car ti) txt-min-y)) 1.0)
-              (progn
-                (setq grid-col (1+ grid-col)
-                      row-texts (cons ti row-texts))
-                (if (and (cadr ti) (> (caddr (cadr ti)) (if row-top row-top -1e99)))
-                  (setq row-top (caddr (cadr ti)))))))
+            (if (< (abs (- ti txt-min-y)) 1.0)
+              (setq grid-col (1+ grid-col))))
           (setq first-p (= grid-n 0)
-                row-top (if row-top (+ row-top box-margin) 0.0))   ; 本行单元盒顶
+                row-ctop (if first-p 0.0 (- txt-min-y text-gap)))   ; 本行"内容顶"
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
@@ -1286,10 +1294,8 @@
                   (setq src-multiline (dt:sz-format-multiline src-fname)
                         title-w (max 80.0 (min unit-w 220.0))
                         title-cx (* 0.5 unit-w)
-                        title-cy (+ part-h text-gap)
-                        txt-bb nil)
-                  (setq txt-obj (dt:sz-make-title cur-doc title-cx title-cy title-w src-multiline)
-                        txt-bb  (if txt-obj (dt:rect-bbox (list txt-obj)) nil))
+                        title-cy (+ part-h text-gap))
+                  (setq txt-obj (dt:sz-make-title cur-doc title-cx title-cy title-w src-multiline))
                   (if (null txt-obj)
                     (princ (strcat "\n【" title "】标注文字生成失败, 本幅按无文字排版。")))
                   (setq unit-bb (dt:rect-bbox (append front-objs back-objs
@@ -1300,20 +1306,25 @@
                         ub-h (+ (- (cadddr unit-bb) (cadr unit-bb)) (* 2.0 box-margin)))
 
                   ;; 4g. 排版落点 = 单元盒左下角 (x0, by0)
-                  ;;     首幅: 原点; 行内追加: 上一幅盒右缘 + box_gap(无会话游标
-                  ;;     时由几何反推本行盒右缘); 换行: 内容最底缘下方 box_gap。
+                  ;;     首幅: 盒左下 =(0,0);
+                  ;;     行内追加: 盒左 = 上一幅盒右 + box_gap(无会话游标时由
+                  ;;               内容几何反推本行盒右缘); 盒顶 = 本行内容顶 +
+                  ;;               (文字高 + text_gap) + box_margin;
+                  ;;     换行: 盒左对齐已有内容左缘(避免阶梯错位), 盒顶落在
+                  ;;           已有内容最底缘下方 box_gap。
                   (cond
                     (first-p
                      (setq x0 0.0 by0 0.0))
                     ((< grid-col per-row)
                      (if (null *dt-wx-last-right*)
                        (setq *dt-wx-last-right*
-                             (dt:sz-row-right tgt-doc row-texts row-top box-margin)))
+                             (dt:sz-row-right tgt-doc row-ctop box-margin)))
                      (setq x0 (+ (if *dt-wx-last-right* *dt-wx-last-right* 0.0) box-gap)
-                           by0 (- row-top ub-h)))
+                           by0 (- (+ row-ctop (- (cadddr unit-bb) part-h) box-margin)
+                                  ub-h)))
                     (T
                      (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc '("外协文字" "外协包络盒"))
-                           x0 0.0
+                           x0 (- (if existing-bb (car existing-bb) 0.0) box-margin)
                            by0 (- (if existing-bb (cadr existing-bb) 0.0)
                                   box-margin box-gap ub-h))))
 

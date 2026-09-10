@@ -233,11 +233,15 @@ def b11():
 check('B-11', 'wx FLBSZ 撤销兜底 + SJTZ 撤销收口 COM 化', b11)
 
 # ---------------------------------------------------------------------------
-# B-12 wx 排版定位基准(几何/单元盒, 而非文字 maxx): 旧版行内追加在无会话游标
-# 时回退"文字 maxx + 20 + box_gap", 而文字居中且宽钳 <=220, 比工件窄 → 相邻幅
-# 间距忽大忽小(实测 10 幅里 1 幅不同)。v2.13 起: 单元盒 = (图形 ∪ 本幅文字)
-# 外扩 box_margin, 四向净距恒 = box_gap; 行内追加以"上一幅单元盒右缘"定位,
-# 无游标时由几何反推本行盒右缘(dt:sz-row-right)。断言: 新基准齐备 + 旧基准清零。
+# B-12 wx 排版定位基准(可靠源, 而非文字 maxx / MText bbox):
+#   旧版(≤v2.12)行内追加在无会话游标时回退"文字 maxx + 20 + box_gap", 文字居中
+#   且宽钳 <=220、比工件窄 → 相邻幅间距忽大忽小(实测 10 幅里 1 幅不同)。
+#   v2.13 起: 单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin, 四向净距 = box_gap。
+#   v2.14: 又发现 v2.13 用"目标图里 MText 的 boundingbox"算行顶/行右缘不可靠
+#   (非活动文档里复制过去的 MText, 实体范围不即时正确 —— 实测行顶偏低 86mm,
+#   导致逐幅 Y 乱飘、行判定失效永不换行)。现在排版基准只取可靠源:
+#   文字"插入点"(属性直读)、内容实体 bbox、当前图里的单元盒测量。
+#   断言: 可靠源基准齐备 + 旧"文字 maxx"基准清零 + 文件内不得再出现 MText bbox 读取。
 # ---------------------------------------------------------------------------
 def b12():
     src = code_of('wx_runner.lsp')
@@ -249,16 +253,20 @@ def b12():
         return False, '成功导出后未把游标更新为单元盒右缘'
     if re.search(r'\(\+ row-maxx 20\.0 box-gap\)', src):
         return False, '仍残留"文字 maxx + 盒边距"旧基准'
-    if '(dt:sz-row-right tgt-doc row-texts row-top box-margin)' not in src:
-        return False, '缺无游标时的几何反推 dt:sz-row-right'
+    if '(dt:sz-row-right tgt-doc row-ctop box-margin)' not in src:
+        return False, '缺无游标时的内容几何反推 dt:sz-row-right'
     if '(dt:sz-make-title cur-doc' not in src:
         return False, '文字未在排版前生成(无法量出"图形∪文字"单元盒)'
+    if 'txt-bb' in src:
+        return False, '仍在读 MText 的 boundingbox(非活动文档里不可靠, 见 v2.14)'
+    if '(- txt-min-y text-gap)' not in src:
+        return False, '行内容顶未由"文字插入点 Y − text_gap"推导'
     if '"text_gap"' not in src or '"box_margin"' not in src:
         return False, '缺 text_gap / box_margin 配置读取'
-    return True, '单元盒右缘定位 + 几何反推兜底 + 文字先量后放 齐备'
+    return True, '可靠源基准齐备(插入点/内容 bbox/当前图测量); 旧文字 maxx 与 MText bbox 均清零'
 
 
-check('B-12', 'wx 排版定位基准(几何/单元盒, 非文字 maxx)', b12)
+check('B-12', 'wx 排版定位基准(可靠源: 插入点/内容 bbox/当前图测量)', b12)
 
 
 # ---------------------------------------------------------------------------
