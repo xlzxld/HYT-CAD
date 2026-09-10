@@ -1,12 +1,21 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.35
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.36
+;;; v9.36  : 通用二封闭线改「本体在 JRT + JRTFBX 定位副本」(用户定案):
+;;;          v9.34 曾把通用二破口封闭线整体挪到 "JRTFBX", 破坏"JRT = 完整
+;;;          加热条"契约 —— 外协加工按图层白名单取线, 漏掉 JRTFBX 就致出图
+;;;          缺封闭线(且需长期维护"JRT+JRTFBX 并集"隐性契约)。改为: 本体
+;;;          回归 "JRT"(加热条与 v9.33 完全一致), 另在 "JRTFBX" 描一份
+;;;          同几何定位副本(dt:jrt2-trace), 供另一项目建模脚本按层定位;
+;;;          JRTFBX 不在外协白名单 → 定位层不混进数据图纸/精雕出图。
+;;;          重跑幂等清理仍含 JRTFBX; 产物检查口径回归单层 "JRT"。
 ;;; v9.35  : 通用一封闭线回退(需求澄清: 加热条封闭线只加在"出线口", 且仅
 ;;;          通用二可实现 —— 通用一是"半成品"嵌套轮廓, 根本没有出线口,
 ;;;          其直线帽封闭线属端帽, 与"出线口封闭线"不是一回事): 撤销
 ;;;          v9.34 对通用一的全部改动 —— dt:jrt-cap-line 帽线回归 "JRT";
 ;;;          dt:jrt-snapshot/dt:jrt-diff 与 dt:jrt-build 快照回归单层;
 ;;;          通用一建层/重跑清理/完成提示语一并回退。保留: 通用二破口封
-;;;          闭线 "JRTFBX" + 全图层配色重排。
+;;;          闭线 "JRTFBX" + 全图层配色重排。(注: 该"通用二封闭线在
+;;;          JRTFBX"已被 v9.36 取代 —— 见上)
 ;;; v9.34  : 加热条封闭线独立图层 "JRTFBX"(用户需求): ①通用二破口封闭线
 ;;;          改放 "JRTFBX"(浅橙 21); ②[已回退, 见 v9.35] 通用一直线帽的
 ;;;          帽线(含 capr≈0 直角帽线与 capr>=半宽 的整弧替换帽)同款改动,
@@ -246,9 +255,10 @@
 ;;;          端帽平面直接取 LD 端点平面推导。
 ;;; 图层   : "JRT" = 加热条(黄色 2, 产物同层; 通用一模板=纯产物层重跑全清;
 ;;;          通用二模板=源线层不清理, 上一轮产物按句柄记忆重跑先删)。
-;;;          "JRTFBX" = 加热条封闭线(浅橙 21, v9.34: 通用二破口封闭线放本
-;;;          层 —— 即加热条出线口封闭线; v9.35 通用一帽线已回退至 "JRT";
-;;;          OFF 预建 15 层含本层, 重跑随产物一并清理)。
+;;;          "JRTFBX" = 加热条封闭线定位层(浅橙 21, v9.36: 通用二破口封闭
+;;;          线的同几何定位副本 —— 本体在 "JRT"; 供另一项目建模脚本按层
+;;;          定位。不在外协加工白名单, 不进数据图纸/精雕出图; OFF 预建
+;;;          15 层含本层, 重跑随产物一并清理)。
 ;;;          "JRTDW" = 加热条定位图层(通用二: 标记每处出线口位置, 一条
 ;;;          线穿过外壁指向板边; v9.24 起内外方向由几何判定, 与其画向无
 ;;;          关, 仅在轮廓围合区域不可判定时作兜底基准)。
@@ -267,7 +277,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-jrt-ver* "v9.35")
+(setq *dt-jrt-ver* "v9.36")
 
 ;; 坑 #69(v9.17): 撤销组统一走 COM 标记 —— *error* 与普通代码都不再碰
 ;; (command); 无开放标记时 EndUndoMark 无副作用, 双重 catch 兜底
@@ -1926,6 +1936,26 @@
         (setq out (cons ln out)))
       out)))
 
+;; v9.36: 把一组实体按同几何在目标图层"再描一层" —— 通用二破口封闭线的
+;; "JRTFBX" 定位副本(本体仍在 "JRT"; 供另一项目建模脚本按层定位用)。只取
+;; 曲线两端点重建直线(通用二产物恒为直线); 端点按项目惯例 error-p + 非 nil
+;; 双判(vlax-curve 越界返 nil 不抛错)。失败跳过不中断。返回新建实体表。
+(defun dt:jrt2-trace (objs layer / out o p1 p2 ln ms)
+  (setq out nil
+        ms  (dt:ms))
+  (foreach o objs
+    (setq p1 (vl-catch-all-apply 'vlax-curve-getstartpoint (list o))
+          p2 (vl-catch-all-apply 'vlax-curve-getendpoint (list o)))
+    (if (and (not (vl-catch-all-error-p p1)) (not (vl-catch-all-error-p p2)) p1 p2)
+      (progn
+        (setq ln (vl-catch-all-apply 'vla-addline
+                   (list ms (vlax-3d-point p1) (vlax-3d-point p2))))
+        (if (and (not (vl-catch-all-error-p ln)) ln)
+          (progn
+            (vla-put-layer ln layer)
+            (setq out (cons ln out)))))))
+  (reverse out))
+
 ;; 两点式主流程(process 环节覆盖, c:JRT 内直接调用):
 ;;   1) JRT 层源线检查 + JRTDW 定位层检查(缺则中止)
 ;;   2) 按句柄记忆删除上一轮产物(只删仍在 JRT 层的; 源线永不删)
@@ -2365,7 +2395,7 @@
   srcs)
 
 (defun dt:jrt2-process ( / doc layers srcs bars dw-all dw-vlas bar-made made ents
-                           kmap neck-ents obj obj-type len ends clns h
+                           kmap neck-ents obj obj-type len ends clns clns-tr h
                            nbar nlayers nclose k kmax d bar flb-v)
   ;; ---- 1) 源线与 JRTDW 定位层检查 ----
   (setq srcs (if (tblsearch "LAYER" "JRT") (dt:layer-vlas "JRT")))
@@ -2390,7 +2420,8 @@
           (dt:ensure-layer layers "JRTFBX" 21 "浅橙")
           ;; ---- 2) 删除上一轮产物(句柄记忆; v9.31: "JT" 层出线口产物一并
           ;;         清除 —— 旧版只认 "JRT", 颈线/两壁/封口/圆角重跑永不
-          ;;         清除逐次叠加; v9.34: "JRTFBX" 封闭线层一并清除;
+          ;;         清除逐次叠加; v9.34 起 "JRTFBX" 层一并清除(v9.36
+          ;;         该层为定位副本);
           ;;         仅清 *jrt2-made* 记忆句柄, flb 假体的
           ;;         JT 实体不在记忆中, 不受影响) ----
           (dt:jrt-undo-mark)
@@ -2448,14 +2479,18 @@
                 (princ "\n【警告】向内偏移步长<=0, 忽略本层。"))
               (setq k (1+ k)))
             ;; 源线 = 最外侧(k=0); 每个头一条封闭线连最外↔最内
+            ;; v9.36: 封闭线本体放 "JRT"(加热条结构保持完整), 另在 "JRTFBX"
+            ;;   描同几何定位副本(dt:jrt2-trace) —— 供建模脚本按层定位
             (setq kmap (append (mapcar '(lambda (o) (cons o 0)) bar) kmap)
                   ends (dt:jrt2-free-ends (append bar bar-made) 0.5)
-                  clns (dt:jrt2-close ends kmap "JRTFBX")
-                  bar-made (append bar-made clns)
+                  clns (dt:jrt2-close ends kmap "JRT")
+                  clns-tr (dt:jrt2-trace clns "JRTFBX")
+                  bar-made (append bar-made clns clns-tr)
                   made (append made bar-made)
                   nclose (+ nclose (length clns)))
             (princ (strcat "\n【通用二】条 " (itoa nbar) ": 破口封闭 "
-                           (itoa (length clns)) " 条(两头各连最外↔最内, 放\"JRTFBX\")。"))
+                           (itoa (length clns)) " 条(两头各连最外↔最内 → \"JRT\"), "
+                           "另描定位副本 → \"JRTFBX\"。"))
             (dt:jrt-undo-end))
           ;; ---- 5.5) 出线口: JRTDW×FLB 颈线(通用二) ----
           (setq neck-ents (dt:jrt2-neck dw-vlas))
@@ -2468,7 +2503,7 @@
           (setq *jrt2-made*
                  (mapcar '(lambda (o) (vla-get-handle o)) made))
           (princ (strcat "\n【完成】通用二加热条已生成 → \"JRT\"图层(黄色), "
-                         "破口封闭线 → \"JRTFBX\"(浅橙): "
+                         "封闭线定位副本 → \"JRTFBX\"(浅橙): "
                          (itoa nbar) " 条, 共 " (itoa nlayers) " 层 / "
                          (itoa (length made)) " 个对象, 破口封闭 "
                          (itoa nclose) " 条; 源线未改动。模板: "

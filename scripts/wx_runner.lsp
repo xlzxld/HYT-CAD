@@ -20,12 +20,19 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.11
+;;; 版本: v2.12
+;;; v2.12 : 精雕图改黄 + 包络盒改绿(用户需求): JD 层色 101→2(黄), 且精雕
+;;;         正反面实体统一置黄 2(覆盖 v2.7~v2.11 的逐实体保色); 外协包络盒
+;;;         222→3(绿, 层色与盒实体色同步)。精雕输出是独立 dwg, 与主图
+;;;         JRT(黄 2)/FBX(绿 3)同色不构成同图歧义 —— check_layer_colors.py
+;;;         对 JD/外协包络盒 豁免唯一性与色差校验(登记核对与字面量白名单仍查)。
+;;;         逻辑零变化。
 ;;; v2.11 : 全图层配色重排(用户需求, 与 flb v10.11 同批): FLB_BOX 130→42
 ;;;         (赭黄), 数据图纸 7→63(橄榄绿), 外协文字 7→144(深青), JD 7→101
 ;;;         (薄荷绿), 外协包络盒 3→222(紫红), ZJJ 210→193(灰紫); ensure-
 ;;;         layer 已存在图层也校正为登记色(老图重跑自动换新色)。逻辑零变化。
-;;;         新增回归 tools/check_layer_colors.py。
+;;;         新增回归 tools/check_layer_colors.py。(注: JD 与 外协包络盒 的色
+;;;         已于 v2.12 再改 —— 见上)
 ;;; v2.10 : 加载横幅精简为一行 + 新增 *dt-wx-ver* 版本单一来源(根治横幅
 ;;;         版本号长期滞后, 本次 v2.8 → v2.10 追平)。
 ;;; v2.9  : 体检B-01/B-02/B-05/B-06/B-11/B-12 六项修复:
@@ -90,7 +97,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.11")
+(setq *dt-wx-ver* "v2.12")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -1180,20 +1187,26 @@
                         ;; 手动框选模式: 100% 全部保留，正反面均不执行任何删除
                         nil)))
 
-                  ;; 4d+. v2.8 精雕: 正反面合并到单一图层"JD"并保留原色。
+                  ;; 4d+. v2.8 精雕: 正反面合并到单一图层"JD"。
                   ;; 注意: 临时实体在 cur-doc —— put-layer 前两个文档都必须
                   ;; 已有 JD 层(v2.7 只建了 tgt 侧, cur-doc 无层致 put-layer
                   ;; 静默失败 = "图形没移动"根因)
+                  ;; v2.12: JD 层色改黄 2, 且精雕正反面实体统一置黄(用户需求:
+                  ;;   精雕图整幅为黄) —— v2.7~v2.11 的"逐实体保留原色"在此
+                  ;;   被统一覆盖。精雕输出为独立 dwg, 与主图 JRT 黄 2 同色
+                  ;;   不构成同图歧义(用户定案)。
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "JD" 101)
-                      (dt:sz-ensure-doc-layer cur-doc "JD" 101)
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 2)
+                      (dt:sz-ensure-doc-layer cur-doc "JD" 2)
                       ;; v2.9: 实参改 cur-doc —— 实体此刻还是 cur-doc 的临时
                       ;; 克隆(CopyObjects 在 4e 步才发生), 查 ByLayer 实体的
                       ;; "原图层色"必须查源侧; 传 tgt-doc 查到的是目标图刚被
                       ;; ensure 成固定色的同名层, 原色保留落空(v2.7 注释失实)
                       (dt:sz-flatten-layer cur-doc front-objs "JD")
-                      (dt:sz-flatten-layer cur-doc back-objs "JD")))
+                      (dt:sz-flatten-layer cur-doc back-objs "JD")
+                      (foreach o (append front-objs back-objs)
+                        (vl-catch-all-apply 'vla-put-color (list o 2)))))
 
                   ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
                   ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
@@ -1236,7 +1249,7 @@
                   ;; 6.5) v2.8 精雕: 目标图中原 FLB 系图层实体并入 JD 层并删原层
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "JD" 101)
+                      (dt:sz-ensure-doc-layer tgt-doc "JD" 2)
                       (setq migrated (dt:sz-migrate-layers
                                        tgt-doc "JD"
                                        (list "FLB" "LS" "RZ" "DK" "JRT" "DP" "ZJJ")))
@@ -1267,10 +1280,10 @@
                     (if (vl-catch-all-error-p txt-obj)
                       (princ (strcat "\n【" title "】生成标注文字警告: " (vl-catch-all-error-message txt-obj)))))
 
-                  ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 紫红 222)
+                  ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 绿 3; v2.12 改色)
                   (if (equal title "精雕")
                     (progn
-                      (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 222)
+                      (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 3)
                       (setq txt-bb (if (and txt-obj (not (vl-catch-all-error-p txt-obj)))
                                      (dt:rect-bbox (list txt-obj)))
                             bx1 (- ins-x 20.0)
@@ -1291,8 +1304,8 @@
                         (progn
                           (vla-put-closed box-obj :vlax-true)
                           ;; v2.4: 实体级颜色 —— 非活动文档的图层色显示不即时生效(同字体坑),
-                          ;; 实体色优先, 首幅即显紫红
-                          (vla-put-color box-obj 222)
+                          ;; 实体色优先(绿 3), 首幅即显
+                          (vla-put-color box-obj 3)
                           (vla-put-layer box-obj "外协包络盒"))
                         (princ "\n【精雕】包络盒生成警告(工件本身不受影响)。"))))
 

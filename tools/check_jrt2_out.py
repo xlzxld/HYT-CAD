@@ -1,12 +1,12 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """JRT 通用二出线口产物回归检查(零依赖, 只读解析 DXF).
 
 用法: python tools/check_jrt2_out.py <dxf文件> [--layer JRT]
 
 断言(口径=1714 测试图(2026-09-09 已移出仓库) + 默认参数跑 JRT 通用二
-后的正确产物; jrt v9.34 起封闭线移至 "JRTFBX" 层, 默认检查
-"JRT"+"JRTFBX" 两层并集 —— 实体集合与旧单层 JRT 口径完全一致):
+后的正确产物; jrt v9.36 起破口封闭线本体回归 "JRT" —— "JRTFBX" 只是
+定位副本(不在默认口径内), 故默认检查回归单层 "JRT"(= v9.33 及以前口径)):
   A. 无短斜线: 长度<12 且非水平/竖直的 LINE = 0
      (v9.27 缺口 -> 环链断裂 -> dt:jrt2-close 误配出 4 条 X 交叉斜线)
   B. 无近失接头: 端点间距落在 (0.01, 3.0) 的端点对 = 0
@@ -83,9 +83,9 @@ def endpoints(ent):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    # jrt v9.34 起破口封闭线放 "JRTFBX" 层, 检查口径改为两层并集(几何
-    # 集合与旧单层 JRT 完全一致); --layer 仍可只查单层。
-    layers = {'JRT', 'JRTFBX'}
+    # jrt v9.36 起破口封闭线本体在 "JRT"(JRTFBX 仅定位副本), 口径单层;
+    # --layer 可改查其他单层。
+    layers = {'JRT'}
     for i, a in enumerate(sys.argv[1:]):
         if a == '--layer' and i + 2 < len(sys.argv):
             layers = {sys.argv[i + 2]}

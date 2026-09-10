@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """AutoLISP 单文件结构校验门禁(AGENTS.md §2 静态检查)。
 用法: python tools/check_lisp.py <scripts/xxx.lsp> (必须传文件参数)
 检查: BOM / 括号 stack 平衡(处理字符串与 \" 转义) / defun 计数 /
@@ -143,7 +143,7 @@ JRT = JRT_COMMON + ['c:JRT', 'c:JRTPARAM', 'dt:jrt-param-dialog',
                  'dt:jrt2-region-edges-n',
                  'dt:jrt2-seg-rebuild',
                  'dt:jrt2-free-ends',
-                'dt:jrt2-close', 'dt:jrt2-group', 'dt:jrt2-grp-touch',
+                'dt:jrt2-close', 'dt:jrt2-trace', 'dt:jrt2-group', 'dt:jrt2-grp-touch',
                 'dt:jrt2-fillet2', 'dt:jrt2-neck', 'dt:jrt2-junction',
                 'dt:jrt2-hooks', 'dt:jrt2-hook-one', 'dt:jrt2-hook-arc',
                 'dt:jrt2-offset-line', 'dt:jrt2-ch-exist', 'dt:jrt2-trim-line',

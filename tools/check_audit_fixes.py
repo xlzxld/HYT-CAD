@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """check_audit_fixes.py —— 2026-09-09 全项目体检(AGENTS.md §4)修复回归断言。
 
 每项断言对应体检清单中一处确凿缺陷的修复: 修复前失败、修复后通过。
@@ -89,35 +89,41 @@ def a01():
 check('A-01', 'jrt 通用二出线口重跑幂等(清理含 JT/JRTFBX 层)', a01)
 
 # ---------------------------------------------------------------------------
-# A-04 通用一误用封闭线层: v9.34 把 JRTFBX 也加给通用一(直线帽帽线), 但需求
-# 仅为"加热条出线口封闭线" —— 通用一是"半成品"嵌套轮廓, 根本没有出线口,
-# 其帽线属端帽, 与"出线口封闭线"不是一回事, 该改动已于 v9.35 回退。
-# 断言: 通用一侧不得再出现 JRTFBX(帽线 put-layer / 快照 / 清理 / 建层),
-#       通用二 dt:jrt2-close 仍以 "JRTFBX" 画破口封闭线。
+# A-04 封闭线图层契约: v9.34 把通用二破口封闭线整体挪到 "JRTFBX", 破坏了
+# "JRT = 完整加热条"契约(外协按图层白名单取线, 漏 JRTFBX 即出图缺线);
+# v9.35 又确认它同样不该加给通用一(通用一是"半成品"嵌套轮廓, 无出线口,
+# 其帽线属端帽)。v9.36 定案: 封闭线本体在 "JRT", "JRTFBX" 仅为同几何定位
+# 副本(dt:jrt2-trace), 供另一项目建模脚本按层定位。
+# 断言: 两侧均不得把实体直接 put-layer 到 "JRTFBX"(须经 trace 助手);
+#       通用一不得做 JRTFBX 快照/清理; dt:jrt2-close 传 "JRT" 且
+#       dt:jrt2-trace 描 "JRTFBX"; ensure-layer "JRTFBX" 恰 1 处。
 # ---------------------------------------------------------------------------
-A04_JRT1 = [
-    (re.compile(r'\(vla-put-layer\s+\S+\s+"JRTFBX"\)'), 'JRTFBX put-layer(通用一帽线)'),
+A04_DIRECT = [
+    (re.compile(r'\(vla-put-layer\s+\S+\s+"JRTFBX"\)'), 'JRTFBX 直接 put-layer(应经 dt:jrt2-trace)'),
     (re.compile(r'\(dt:jrt-snapshot "JRTFBX"\)'), 'dt:jrt-snapshot "JRTFBX"'),
     (re.compile(r'\(dt:purge-layer "JRTFBX"\)'), 'dt:purge-layer "JRTFBX"'),
 ]
-A04_JRT2_CLOSE = re.compile(r'\(dt:jrt2-close ends kmap "JRTFBX"\)')
+A04_CLOSE = re.compile(r'\(dt:jrt2-close ends kmap "JRT"\)')
+A04_TRACE = re.compile(r'\(dt:jrt2-trace clns "JRTFBX"\)')
 A04_ENSURE = re.compile(r'\(dt:ensure-layer layers "JRTFBX" 21')
 
 
 def a04():
     src = code_of('jrt_runner.lsp')
-    bad = [d for p, d in A04_JRT1 if p.search(src)]
+    bad = [d for p, d in A04_DIRECT if p.search(src)]
     if bad:
-        return False, '通用一侧残留 JRTFBX: %s' % '; '.join(bad)
+        return False, '残留直接写 JRTFBX: %s' % '; '.join(bad)
     n = len(A04_ENSURE.findall(src))
     if n != 1:
         return False, 'ensure-layer "JRTFBX" 应恰好 1 处(通用二), 实为 %d' % n
-    if not A04_JRT2_CLOSE.search(src):
-        return False, '通用二 dt:jrt2-close 未传 "JRTFBX"'
-    return True, '通用一无 JRTFBX; 通用二破口封闭线仍走 JRTFBX'
+    if not A04_CLOSE.search(src):
+        return False, '通用二 dt:jrt2-close 未传 "JRT"'
+    if not A04_TRACE.search(src):
+        return False, '缺 dt:jrt2-trace ... "JRTFBX" 定位副本'
+    return True, '封闭线本体在 JRT + JRTFBX 仅定位副本(ensure 恰 1 处)'
 
 
-check('A-04', '通用一封闭线回退(通用一无 JRTFBX / 通用二保留)', a04)
+check('A-04', '封闭线图层契约(本体 JRT / JRTFBX 仅定位副本)', a04)
 
 # ---------------------------------------------------------------------------
 # B-08 dt:jrt2-wall-tan 终点侧取样未判空: 交点距壁端 <0.01 时

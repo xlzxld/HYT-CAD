@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """图层配色门禁(零依赖): 扫描 scripts/*.lsp 的图层色登记, 断言三条:
 
@@ -7,7 +7,9 @@
   B. 唯一性 —— 不允许两个图层共用同一 ACI 色号;
   C. 区分度 —— 任意两色 CIE Lab 色差 dE >= 30
      (v10.11/flb + v9.34/jrt + v11.8/cx + v2.11/wx 配色重排口径:
-      现状曾有 5 对图层完全同色, 重排后全 21 色两两最小 dE=31.3).
+      现状曾有 5 对图层完全同色, 重排后两两最小 dE=31.3).
+     v2.12: JD(黄2)/外协包络盒(绿3)按用户定案用标准色, 与 JRT/FBX 同值,
+     但只出现在独立的外协输出 dwg, 故豁免 B/C(见 CROSS_DWG_EXEMPT).
 
 扫描规则(只认数字字面量, 变量传色天然跳过):
   a. ensure 登记表行:        (list "层名" 色号 "中文名")
@@ -37,9 +39,15 @@ EXPECTED = {
     'LD': 7, 'FLB': 1, 'FBX': 3, 'LS': 4, 'JT': 6, 'JTFBX': 230,
     'RZ': 30, 'DK': 8, 'DP': 5, 'CX': 161, 'CXK': 122,
     'JRT': 2, 'JRTDW': 61, 'JRTFBX': 21, 'ZJJ': 193,
-    'FLB_BOX': 42, '数据图纸': 63, 'JD': 101, '外协文字': 144,
-    '外协包络盒': 222, 'YXB': 84,
+    'FLB_BOX': 42, '数据图纸': 63, 'JD': 2, '外协文字': 144,
+    '外协包络盒': 3, 'YXB': 84,
 }
+
+# v2.12: 跨图纸同色豁免 —— JD(精雕)与"外协包络盒"只出现在外协输出图纸
+# (独立 dwg; 精雕输出中 JRT 等源层已并入 JD 并删层), 与主图图层不会同图
+# 共存, 按用户定案用标准色 黄 2 / 绿 3(与 JRT 黄 2 / FBX 绿 3 同值):
+# 豁免它们参与 B 唯一性与 C 色差检查; A 登记核对与 D 字面量白名单仍照查。
+CROSS_DWG_EXEMPT = {'JD', '外协包络盒'}
 
 # cx 内联建层的 tblsearch+put-color 窗口行数
 CXK_WINDOW = 6
@@ -129,13 +137,15 @@ def main():
     # B. 唯一性
     used = {}
     for name, aci in EXPECTED.items():
+        if name in CROSS_DWG_EXEMPT:
+            continue
         used.setdefault(aci, []).append(name)
     for aci, names in sorted(used.items()):
         if len(names) > 1:
             fails.append('B. 色号 %d 被多图层共用: %s' % (aci, names))
 
     # C. 两两色差
-    acis = sorted(EXPECTED.values())
+    acis = sorted(set(EXPECTED.values()))   # 去重: 跨图纸豁免层与主图层同值
     weak = []
     for i, a in enumerate(acis):
         for b in acis[i + 1:]:
@@ -157,8 +167,9 @@ def main():
 
     worst = min((dE(aci_rgb(a), aci_rgb(b)) for x, a in enumerate(acis)
                  for b in acis[x + 1:]), default=0)
-    print('图层 %d 个, 色号 %d 个, 两两最小 dE=%.1f' %
-          (len(EXPECTED), len(acis), worst))
+    print('图层 %d 个, 去重色号 %d 个(跨图纸同色豁免 %d 层: %s), 两两最小 dE=%.1f' %
+          (len(EXPECTED), len(acis), len(CROSS_DWG_EXEMPT),
+           '/'.join(sorted(CROSS_DWG_EXEMPT)), worst))
     if fails:
         print('== FAIL')
         for m in fails:
