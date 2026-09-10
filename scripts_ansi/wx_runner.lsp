@@ -20,7 +20,23 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.12
+;;; 版本: v2.13
+;;; v2.13 : 排版间距根治(用户需求, 四项):
+;;;         ①精雕包络盒间距四向统一 —— 旧版盒定义不对称(左/下 20, 上=文字顶
+;;;           +20), 实测横向净距 = box_gap-20、纵向 = 50+文字高-box_gap(略
+;;;           重叠)。改为"单元包络盒 = (图形 ∪ 本幅文字) 外扩 box_margin",
+;;;           行内追加取上一幅盒右缘 + box_gap, 换行取内容最底缘下方 box_gap
+;;;           —— 四向净距恒 = box_gap;
+;;;         ②线切割间距偶发不一致根治 —— 旧版会话游标缺失(新开 CAD/换目标图
+;;;           后的首幅)时回退用"文字 maxx"作基准, 文字居中且宽钳 <=220, 比
+;;;           工件窄 → 首幅间距偏大(实测 10 幅里 1 幅不同)。改为缺游标时由
+;;;           几何反推本行单元盒右缘(dt:sz-row-right);
+;;;         ③文字与图形的距离可配 —— 旧版硬编码 50, 新增 [排版] text_gap;
+;;;           基准 = "图形最小包络盒"顶边(摆正后的最小外包盒, 等价于测量
+;;;           分流板命令的 AABB/OBB 算法; 不实际生成包络盒, 仅作基准);
+;;;         ④[排版] 四项全部可配: box_gap / per_row / text_gap / box_margin。
+;;;         实现要点: 文字改在"当前图"临时生成并量出真实包围盒(与图形合成
+;;;         单元盒), 随工件一起拷入目标图 —— 无需事后回填位置。
 ;;; v2.12 : 精雕图改黄 + 包络盒改绿(用户需求): JD 层色 101→2(黄), 且精雕
 ;;;         正反面实体统一置黄 2(覆盖 v2.7~v2.11 的逐实体保色); 外协包络盒
 ;;;         222→3(绿, 层色与盒实体色同步)。精雕输出是独立 dwg, 与主图
@@ -97,7 +113,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.12")
+(setq *dt-wx-ver* "v2.13")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -934,21 +950,55 @@
         (if (= p1 p2) (setq found d)))))
   found)
 
-;; 探测目标图纸中已有全部图元的总体外包盒 (用于计算向右平铺落点)
-(defun dt:sz-doc-ms-bbox (doc / ms mn mx p minx miny maxx maxy o)
+;; 探测目标图纸中已有图元的总体外包盒 (计算平铺落点用)
+;; v2.13: 新增可选 excl-layers —— 排除这些图层后求"内容"外包盒(排版基准用:
+;;        排除 外协文字/外协包络盒, 免得文字或盒把基准撑大); 省略=nil=全部图元。
+(defun dt:sz-doc-ms-bbox (doc excl-layers / ms mn mx p minx miny maxx maxy o lay)
   (setq ms (vla-get-modelspace doc)
         minx nil miny nil maxx nil maxy nil)
   (vlax-for o ms
-    (setq mn nil mx nil)
-    (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-getboundingbox (list o 'mn 'mx))))
+    (setq lay (vl-catch-all-apply 'vla-get-layer (list o)))
+    (if (and (not (vl-catch-all-error-p lay)) lay
+             (not (and excl-layers
+                       (member (strcase lay)
+                               (mapcar 'strcase excl-layers)))))
       (progn
-        (setq p (dt:rect-bb-pts mn))
-        (setq minx (if minx (min minx (car p)) (car p))
-              miny (if miny (min miny (cadr p)) (cadr p)))
-        (setq p (dt:rect-bb-pts mx))
-        (setq maxx (if maxx (max maxx (car p)) (car p))
-              maxy (if maxy (max maxy (cadr p)) (cadr p))))))
+        (setq mn nil mx nil)
+        (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-getboundingbox (list o 'mn 'mx))))
+          (progn
+            (setq p (dt:rect-bb-pts mn))
+            (setq minx (if minx (min minx (car p)) (car p))
+                  miny (if miny (min miny (cadr p)) (cadr p)))
+            (setq p (dt:rect-bb-pts mx))
+            (setq maxx (if maxx (max maxx (car p)) (car p))
+                  maxy (if maxy (max maxy (cadr p)) (cadr p))))))))
   (if (and minx miny maxx maxy) (list minx miny maxx maxy) nil))
+
+;; v2.13: 由几何反推"当前行"单元盒右缘 —— 本次会话首幅 / 换目标图后无会话游标
+;; 时的定位兜底。基准 = max(本行文字右缘, 本行内容右缘) + box_margin。
+;; 本行内容判定: bbox maxY <= row-top(本行盒顶) —— 行上方各幅的内容底边必高于
+;; 本行盒顶(相隔 box_gap+box_margin), 故该过滤恰为本行, 与图形高度无关。
+;; 根治 v2.11 缺陷: 旧兜底直接拿"文字 maxx"当基准, 文字居中且宽钳 <=220,
+;; 比工件窄时基准偏小 → 相邻两幅间距忽大忽小(实测 10 幅里 1 幅不同)。
+(defun dt:sz-row-right (doc row-texts row-top margin / ms n i o lay bb right rec)
+  (setq ms (vla-get-modelspace doc)
+        n  (vla-get-count ms)
+        i  0
+        right nil)
+  (foreach rec row-texts
+    (if (cadr rec)
+      (setq right (if right (max right (caddr (cadr rec))) (caddr (cadr rec))))))
+  (while (< i n)
+    (setq o (vla-item ms i)
+          i (1+ i))
+    (setq lay (vl-catch-all-apply 'vla-get-layer (list o)))
+    (if (and (not (vl-catch-all-error-p lay)) lay
+             (not (member (strcase lay) '("外协文字" "外协包络盒"))))
+      (progn
+        (setq bb (dt:rect-bbox (list o)))
+        (if (and bb (<= (cadddr bb) (+ row-top 1.0)))
+          (setq right (if right (max right (caddr bb)) (caddr bb)))))))
+  (if right (+ right margin) nil))
 
 ;; 提取热流道脚本自动化生成的有效加工曲线 (严格限定在 FLB, LS, RZ, DK, JRT, DP, ZJJ 白名单)
 (defun dt:sz-collect-auto-curves ( / ss ents cands e ed lay obj)
@@ -998,27 +1048,55 @@
         (setq m-objs (cons (vlax-ename->vla-object last-e) m-objs)))
       (reverse m-objs))))
 
+;; v2.13: 按统一规格在指定文档生成幅标题 MText, 返回对象(nil=失败)。
+;; 调用方须先确保该文档已有文字样式 DT_WX_STYLE 与图层 外协文字。
+;; 规格: 字高 15 / 行距系数 1.2 / 底边居中(向上生长) / 外协文字层。
+(defun dt:sz-make-title (doc cx cy width text / ms o)
+  (setq ms (vla-get-modelspace doc)
+        o  (vl-catch-all-apply
+             'vla-addmtext
+             (list ms (vlax-3d-point (list cx cy 0.0)) width text)))
+  (if (or (vl-catch-all-error-p o) (null o))
+    nil
+    (progn
+      (vl-catch-all-apply 'vla-put-height (list o 15.0))
+      ;; 8 = acAttachmentPointBottomCenter (底部居中, 向上生长且水平严格居中)
+      (vl-catch-all-apply 'vla-put-attachmentpoint (list o 8))
+      (vl-catch-all-apply 'vla-put-insertionpoint (list o (vlax-3d-point (list cx cy 0.0))))
+      (vl-catch-all-apply 'vla-put-linespacingfactor (list o 1.2))
+      (vl-catch-all-apply 'vla-put-layer (list o "外协文字"))
+      (vl-catch-all-apply 'vla-put-stylename (list o "DT_WX_STYLE"))
+      o)))
+
 ;; 将所选曲线排版并输出到目标 DWG (当前文档原生处理 + 原子级传输 + 防覆盖平铺 + 文字标注)
 ;; is-auto: T=自动提取图层, nil=手动框选(手动模式 100% 全保留)
 (defun dt:sz-export-to-dwg (cands title target-layer is-auto /
                             cur-doc acad docs target-path tgt-doc
-                            ms-tgt existing-bb ins-x ins-y rot-ang
+                            ms-tgt existing-bb rot-ang
                             front-objs back-objs export-objs o c
                             src-bb s-minx s-miny s-maxx s-maxy part-w part-h
                             off-x off-y sa r
                             tmp-dir tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
-                            box-gap per-row grid-n grid-col txt-list txt-infos txt-min-y row-maxx y-top ip-t txt-bb migrated
-                            unit-w ax bx1 by1 bx2 by2 box-obj)
+                            box-gap per-row text-gap box-margin
+                            grid-n grid-col txt-list txt-infos txt-min-y ip-t ti txt-bb migrated
+                            unit-w ax unit-bb ub-w ub-h row-texts row-top
+                            first-p x0 by0 bx1 by1 bx2 by2 dx dy box-obj)
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
         docs    (vla-get-documents acad)
-        ;; v2.5: 盒间距单参数(wx_runner.ini [排版] box_gap, 默认 100mm) ——
-        ;; 行/列追加与包络盒间距统一用它, 上下左右恒定
+        ;; v2.13: [排版] 四项全部可配(wx_runner.ini, 缺项回退下列默认值) ——
+        ;;   box_gap    相邻输出单元之间的净间距(精雕=包络盒<->包络盒; 线切割=
+        ;;              "图形+文字"合成盒<->合成盒)。上下左右四向同一值。
+        ;;   per_row    每行幅数(排版满该数后向下换行); <=0 回退 4
+        ;;   text_gap   文字底边距"图形最小包络盒"顶边的距离
+        ;;   box_margin 单元包络盒相对内容的外扩内边距(精雕会画出该盒;
+        ;;              线切割只用它作排版基准, 不画盒)
         box-gap (atof (dt:sz-cfg-get "排版" "box_gap" "100.0"))
-        ;; v2.7: 每行幅数可配置(ini [排版] per_row, 默认 4; <=0 回退 4)
-        per-row (max 1 (atoi (dt:sz-cfg-get "排版" "per_row" "4"))))
+        per-row (max 1 (atoi (dt:sz-cfg-get "排版" "per_row" "4")))
+        text-gap (atof (dt:sz-cfg-get "排版" "text_gap" "50.0"))
+        box-margin (atof (dt:sz-cfg-get "排版" "box_margin" "20.0")))
 
   ;; 0) 预先探测源图形的整体倾斜角 (用于后续正交旋转摆正)
   (setq rot-ang (dt:sz-detect-tilt-angle cands))
@@ -1065,18 +1143,18 @@
               (dt:sz-ensure-doc-layer tgt-doc "DP" 5)
               (dt:sz-ensure-doc-layer tgt-doc "ZJJ" 193)))
 
-          ;; 3) v2.6 网格排版(纯几何推导): 单位标记 = "外协文字"层 MText(每幅
-          ;;    恰好 1 个, 同时缓存各自 bbox)。当前行 = 插入点 Y 最小的文字组;
-          ;;    行内 <4 幅 → 行内追加(x = 当前行盒右缘 + box_gap; 盒右缘 =
-          ;;    文字 maxx + 20 盒边距); 已满 4 幅 → 向下换行(y_top =
-          ;;    图纸 miny - 20 - box_gap)。盒与内容间保留 20mm 内边距,
-          ;;    盒与盒之间净距 = box_gap(ini [排版] 可调)。
+          ;; 3) v2.13 排版基准(几何 + 文字双锚, 不依赖会话状态):
+          ;;    单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin; 相邻单元盒净距 =
+          ;;    box_gap(上下左右同一值); 文字底边距图形最小包络盒顶边 =
+          ;;    text_gap。"当前行" = "外协文字"插入点 Y 最小的那一行
+          ;;    (同行各幅共享行顶, 见 4g 的 by0 回填)。
           (setq txt-list (dt:sz-doc-texts tgt-doc "外协文字")
                 grid-n   (length txt-list)
                 grid-col 0
                 txt-infos nil
                 txt-min-y 1e99
-                row-maxx -1e99)
+                row-texts nil
+                row-top nil)
           (foreach o txt-list
             (setq ip-t (vlax-safearray->list
                          (vlax-variant-value (vla-get-insertionpoint o)))
@@ -1086,28 +1164,12 @@
           (foreach ti txt-infos
             (if (< (abs (- (car ti) txt-min-y)) 1.0)
               (progn
-                (setq grid-col (1+ grid-col))
-                (if (and (cadr ti) (> (caddr (cadr ti)) row-maxx))
-                  (setq row-maxx (caddr (cadr ti)))))))
-          (cond
-            ((= grid-n 0)
-             (setq ins-x 0.0 y-top 0.0))                      ; 首幅(基线 0, 4e 回填)
-            ((< grid-col per-row)
-             ;; v2.9: 优先用本次会话上一幅真实右缘(*dt-wx-last-right*) ——
-             ;; 标题文字宽被钳到 <=220 且居中, 工件宽 >180 时文字 maxx 落在
-             ;; 工件包络内, 旧写法用文字 maxx 定位 → 两幅重叠(350 宽 FLB
-             ;; 必叠); 跨会话无游标时回退文字 maxx(旧行为)
-             (setq ins-x (cond
-                           (*dt-wx-last-right*
-                            (+ *dt-wx-last-right* 20.0 box-gap)) ; 内容右缘+盒边距+盒间距
-                           ((> row-maxx -1e98)
-                            (+ row-maxx 20.0 box-gap))           ; 盒右缘 + 盒间距
-                           (T box-gap))
-                   y-top (- txt-min-y 50.0)))                 ; 行内追加: 与行顶对齐
-            (T
-             (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc)
-                   ins-x 0.0
-                   y-top (- (if existing-bb (cadr existing-bb) 0.0) 20.0 box-gap)))) ; 行满换行
+                (setq grid-col (1+ grid-col)
+                      row-texts (cons ti row-texts))
+                (if (and (cadr ti) (> (caddr (cadr ti)) (if row-top row-top -1e99)))
+                  (setq row-top (caddr (cadr ti)))))))
+          (setq first-p (= grid-n 0)
+                row-top (if row-top (+ row-top box-margin) 0.0))   ; 本行单元盒顶
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
@@ -1208,16 +1270,61 @@
                       (foreach o (append front-objs back-objs)
                         (vl-catch-all-apply 'vla-put-color (list o 2)))))
 
-                  ;; 4e. 合并正面与反面图元，整体平移至目标排版位置 (ins-x, ins-y)
-                  ;;     v2.4: 基线由 y_top(行顶锚点)与本幅高度回填
-                  (setq export-objs (append front-objs back-objs)
-                        unit-w (if (equal title "精雕")
+                  ;; 4e. 单元宽度: 精雕 = 本体 + 75 镜像间隔 + 反面
+                  (setq unit-w (if (equal title "精雕")
                                  (+ (* 2.0 part-w) 75.0)
-                                 part-w)
-                        ins-y (if (= grid-n 0) 0.0 (- y-top part-h)))
-                  (if (or (> ins-x 0.0) (/= ins-y 0.0))
+                                 part-w))
+
+                  ;; 4f. v2.13 文字先在"当前图"临时生成并量出真实包围盒, 与图形
+                  ;;     合成"单元最小包络盒" —— 排版间距以它为准(精雕据此画盒;
+                  ;;     线切割只用它作基准、不画盒)。文字底边距图形最小包络盒
+                  ;;     顶边 = text_gap(可配)。测完随工件一起拷入目标图。
+                  (dt:sz-ensure-style cur-doc)
+                  (dt:sz-ensure-doc-layer cur-doc "外协文字" 144)
+                  (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
+                  (if (or (null src-fname) (= src-fname "")) (setq src-fname "未命名工件"))
+                  (setq src-multiline (dt:sz-format-multiline src-fname)
+                        title-w (max 80.0 (min unit-w 220.0))
+                        title-cx (* 0.5 unit-w)
+                        title-cy (+ part-h text-gap)
+                        txt-bb nil)
+                  (setq txt-obj (dt:sz-make-title cur-doc title-cx title-cy title-w src-multiline)
+                        txt-bb  (if txt-obj (dt:rect-bbox (list txt-obj)) nil))
+                  (if (null txt-obj)
+                    (princ (strcat "\n【" title "】标注文字生成失败, 本幅按无文字排版。")))
+                  (setq unit-bb (dt:rect-bbox (append front-objs back-objs
+                                                      (if txt-obj (list txt-obj) nil))))
+                  (if (or (null unit-bb) (/= (length unit-bb) 4))
+                    (setq unit-bb (list 0.0 0.0 unit-w part-h)))
+                  (setq ub-w (+ (- (caddr unit-bb) (car unit-bb)) (* 2.0 box-margin))
+                        ub-h (+ (- (cadddr unit-bb) (cadr unit-bb)) (* 2.0 box-margin)))
+
+                  ;; 4g. 排版落点 = 单元盒左下角 (x0, by0)
+                  ;;     首幅: 原点; 行内追加: 上一幅盒右缘 + box_gap(无会话游标
+                  ;;     时由几何反推本行盒右缘); 换行: 内容最底缘下方 box_gap。
+                  (cond
+                    (first-p
+                     (setq x0 0.0 by0 0.0))
+                    ((< grid-col per-row)
+                     (if (null *dt-wx-last-right*)
+                       (setq *dt-wx-last-right*
+                             (dt:sz-row-right tgt-doc row-texts row-top box-margin)))
+                     (setq x0 (+ (if *dt-wx-last-right* *dt-wx-last-right* 0.0) box-gap)
+                           by0 (- row-top ub-h)))
+                    (T
+                     (setq existing-bb (dt:sz-doc-ms-bbox tgt-doc '("外协文字" "外协包络盒"))
+                           x0 0.0
+                           by0 (- (if existing-bb (cadr existing-bb) 0.0)
+                                  box-margin box-gap ub-h))))
+
+                  ;; 4h. 图形与文字整体平移, 使单元盒左下角落在 (x0, by0)
+                  (setq export-objs (append front-objs back-objs
+                                            (if txt-obj (list txt-obj) nil))
+                        dx (- (+ x0 box-margin) (car unit-bb))
+                        dy (- (+ by0 box-margin) (cadr unit-bb)))
+                  (if (or (/= dx 0.0) (/= dy 0.0))
                     (foreach o export-objs
-                      (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list ins-x ins-y 0.0)))))
+                      (vla-move o (vlax-3d-point '(0 0 0)) (vlax-3d-point (list dx dy 0.0)))))
 
                   ;; 5) 原子级跨图纸深拷贝 (CopyObjects, 异常回退 WBLOCK)
                   (setq sa (vlax-make-safearray vlax-vbObject (cons 0 (1- (length export-objs)))))
@@ -1258,40 +1365,20 @@
 【精雕】已将 " (itoa migrated)
                                        " 个实体并入 JD 图层, 原图层已移除。")))))
 
-                  ;; 7) 在目标图纸工件上方居中标注原图纸文件名 (字高 15，多行居中对齐，距离工件顶沿 50mm 防遮挡)
-                  (setq src-fname (vl-filename-base (dt:sz-gets "DWGNAME")))
-                  (if (or (null src-fname) (= src-fname "")) (setq src-fname "未命名工件"))
-                  (setq src-multiline (dt:sz-format-multiline src-fname))
-                  (setq title-cx (+ ins-x (* 0.5 unit-w))
-                        title-cy (+ ins-y part-h 50.0)
-                        title-w  (max 80.0 (min unit-w 220.0)))
-                  (setq txt-obj (vl-catch-all-apply
-                                  'vla-addmtext
-                                  (list ms-tgt (vlax-3d-point (list title-cx title-cy 0.0)) title-w src-multiline)))
-                  (if (and (not (vl-catch-all-error-p txt-obj)) txt-obj)
-                    (progn
-                      (vl-catch-all-apply 'vla-put-height (list txt-obj 15.0))
-                      ;; 8 = acAttachmentPointBottomCenter (底部居中对齐，向上生长且水平严格居中)
-                      (vl-catch-all-apply 'vla-put-attachmentpoint (list txt-obj 8))
-                      (vl-catch-all-apply 'vla-put-insertionpoint (list txt-obj (vlax-3d-point (list title-cx title-cy 0.0))))
-                      (vl-catch-all-apply 'vla-put-linespacingfactor (list txt-obj 1.2))
-                      (vl-catch-all-apply 'vla-put-layer (list txt-obj "外协文字"))
-                      (vl-catch-all-apply 'vla-put-stylename (list txt-obj "DT_WX_STYLE")))
-                    (if (vl-catch-all-error-p txt-obj)
-                      (princ (strcat "\n【" title "】生成标注文字警告: " (vl-catch-all-error-message txt-obj)))))
+                  ;; 7) v2.13: 标注文字已在 4f 生成并随工件一并拷入目标图 ——
+                  ;;    因排版间距要用"图形 ∪ 文字"的真实单元盒, 必须先量后放,
+                  ;;    不能再像旧版那样拷完再补文字。
 
                   ;; 7.5) v2.3 精雕: 本体+镜像+文字 整体包络盒(独立图层"外协包络盒", 绿 3; v2.12 改色)
                   (if (equal title "精雕")
                     (progn
                       (dt:sz-ensure-doc-layer tgt-doc "外协包络盒" 3)
-                      (setq txt-bb (if (and txt-obj (not (vl-catch-all-error-p txt-obj)))
-                                     (dt:rect-bbox (list txt-obj)))
-                            bx1 (- ins-x 20.0)
-                            by1 (- ins-y 20.0)
-                            bx2 (+ ins-x unit-w 20.0)
-                            by2 (if txt-bb
-                                  (+ (cadddr txt-bb) 20.0)
-                                  (+ ins-y part-h 130.0)))
+                      ;; v2.13: 盒 = 4f/4g 已算定的单元包络盒 —— 与间距同源,
+                      ;; 相邻两盒四向净距恒等于 box_gap
+                      (setq bx1 x0
+                            by1 by0
+                            bx2 (+ x0 ub-w)
+                            by2 (+ by0 ub-h))
                       (setq box-obj (vl-catch-all-apply
                                       'vla-addlightweightpolyline
                                       (list ms-tgt
@@ -1320,13 +1407,14 @@
                   (princ "\n------------------------------------------------------------")
                   (princ (strcat "\n【" title "】工件已成功输出并排版至: " target-path))
                   (princ (strcat "\n【" title "】排版位置: 第 " (itoa (1+ grid-n))
-                                 " 幅 (X=" (rtos ins-x 2 2)
-                                 " Y=" (rtos ins-y 2 2) ", 盒间距 " (rtos box-gap 2 0) "mm"
-                                 (if (equal title "精雕") ", 镜像在右侧 75mm, 已加包络盒" "")
+                                 " 幅 (单元盒左下 X=" (rtos x0 2 2)
+                                 " Y=" (rtos by0 2 2) ", 间距 " (rtos box-gap 2 0) "mm"
+                                 ", 单元盒 " (rtos ub-w 2 1) "x" (rtos ub-h 2 1)
+                                 (if (equal title "精雕") ", 镜像在右侧 75mm" "")
                                  ", 上方已标注文件名)"))
                   (princ "\n------------------------------------------------------------")
-                  ;; v2.9: 记录本幅真实右缘, 下一幅行内追加以它定位(见上)
-                  (setq *dt-wx-last-right* (+ ins-x unit-w))
+                  ;; v2.13: 记录本幅单元盒右缘, 下一幅行内追加直接以它为基准(见 4g)
+                  (setq *dt-wx-last-right* (+ x0 ub-w))
                   T)))))))))
 
 ;; ============================================================================

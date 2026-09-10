@@ -233,22 +233,32 @@ def b11():
 check('B-11', 'wx FLBSZ 撤销兜底 + SJTZ 撤销收口 COM 化', b11)
 
 # ---------------------------------------------------------------------------
-# B-12 wx 行内排版用标题文字 maxx 定位: 文字宽钳 <=220 且居中, 工件宽
-# >180 时文字 maxx 落在工件包络内 → 下一幅左移重叠。断言: 会话级右缘
-# 游标 *dt-wx-last-right* 存在, 既用于行内追加定位, 也在成功导出后更新。
+# B-12 wx 排版定位基准(几何/单元盒, 而非文字 maxx): 旧版行内追加在无会话游标
+# 时回退"文字 maxx + 20 + box_gap", 而文字居中且宽钳 <=220, 比工件窄 → 相邻幅
+# 间距忽大忽小(实测 10 幅里 1 幅不同)。v2.13 起: 单元盒 = (图形 ∪ 本幅文字)
+# 外扩 box_margin, 四向净距恒 = box_gap; 行内追加以"上一幅单元盒右缘"定位,
+# 无游标时由几何反推本行盒右缘(dt:sz-row-right)。断言: 新基准齐备 + 旧基准清零。
 # ---------------------------------------------------------------------------
 def b12():
     src = code_of('wx_runner.lsp')
     if '*dt-wx-last-right*' not in src:
-        return False, '缺右缘游标 *dt-wx-last-right*'
-    if not re.search(r'\(\+ \*dt-wx-last-right\* 20\.0 box-gap\)', src):
-        return False, '行内追加未用右缘游标定位'
-    if '(setq *dt-wx-last-right* (+ ins-x unit-w))' not in src:
-        return False, '成功导出后未更新右缘游标'
-    return True, '右缘游标定义/消费/更新齐备'
+        return False, '缺单元盒右缘游标 *dt-wx-last-right*'
+    if not re.search(r'\(\+ \(if \*dt-wx-last-right\* \*dt-wx-last-right\* 0\.0\) box-gap\)', src):
+        return False, '行内追加未以单元盒右缘 + box_gap 定位'
+    if '(setq *dt-wx-last-right* (+ x0 ub-w))' not in src:
+        return False, '成功导出后未把游标更新为单元盒右缘'
+    if re.search(r'\(\+ row-maxx 20\.0 box-gap\)', src):
+        return False, '仍残留"文字 maxx + 盒边距"旧基准'
+    if '(dt:sz-row-right tgt-doc row-texts row-top box-margin)' not in src:
+        return False, '缺无游标时的几何反推 dt:sz-row-right'
+    if '(dt:sz-make-title cur-doc' not in src:
+        return False, '文字未在排版前生成(无法量出"图形∪文字"单元盒)'
+    if '"text_gap"' not in src or '"box_margin"' not in src:
+        return False, '缺 text_gap / box_margin 配置读取'
+    return True, '单元盒右缘定位 + 几何反推兜底 + 文字先量后放 齐备'
 
 
-check('B-12', 'wx 行内排版改用真实右缘游标', b12)
+check('B-12', 'wx 排版定位基准(几何/单元盒, 非文字 maxx)', b12)
 
 
 # ---------------------------------------------------------------------------
