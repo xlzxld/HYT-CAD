@@ -89,6 +89,37 @@ def a01():
 check('A-01', 'jrt 通用二出线口重跑幂等(清理含 JT/JRTFBX 层)', a01)
 
 # ---------------------------------------------------------------------------
+# A-04 通用一误用封闭线层: v9.34 把 JRTFBX 也加给通用一(直线帽帽线), 但需求
+# 仅为"加热条出线口封闭线" —— 通用一是"半成品"嵌套轮廓, 根本没有出线口,
+# 其帽线属端帽, 与"出线口封闭线"不是一回事, 该改动已于 v9.35 回退。
+# 断言: 通用一侧不得再出现 JRTFBX(帽线 put-layer / 快照 / 清理 / 建层),
+#       通用二 dt:jrt2-close 仍以 "JRTFBX" 画破口封闭线。
+# ---------------------------------------------------------------------------
+A04_JRT1 = [
+    (re.compile(r'\(vla-put-layer\s+\S+\s+"JRTFBX"\)'), 'JRTFBX put-layer(通用一帽线)'),
+    (re.compile(r'\(dt:jrt-snapshot "JRTFBX"\)'), 'dt:jrt-snapshot "JRTFBX"'),
+    (re.compile(r'\(dt:purge-layer "JRTFBX"\)'), 'dt:purge-layer "JRTFBX"'),
+]
+A04_JRT2_CLOSE = re.compile(r'\(dt:jrt2-close ends kmap "JRTFBX"\)')
+A04_ENSURE = re.compile(r'\(dt:ensure-layer layers "JRTFBX" 21')
+
+
+def a04():
+    src = code_of('jrt_runner.lsp')
+    bad = [d for p, d in A04_JRT1 if p.search(src)]
+    if bad:
+        return False, '通用一侧残留 JRTFBX: %s' % '; '.join(bad)
+    n = len(A04_ENSURE.findall(src))
+    if n != 1:
+        return False, 'ensure-layer "JRTFBX" 应恰好 1 处(通用二), 实为 %d' % n
+    if not A04_JRT2_CLOSE.search(src):
+        return False, '通用二 dt:jrt2-close 未传 "JRTFBX"'
+    return True, '通用一无 JRTFBX; 通用二破口封闭线仍走 JRTFBX'
+
+
+check('A-04', '通用一封闭线回退(通用一无 JRTFBX / 通用二保留)', a04)
+
+# ---------------------------------------------------------------------------
 # B-08 dt:jrt2-wall-tan 终点侧取样未判空: 交点距壁端 <0.01 时
 # getpointatdist(+dist 0.01) 越界返 nil(低版本不抛错), (nth 0 p2) 直接
 # 入减法 → 参数类型错误。断言: 函数内存在 p1/p2 非 nil + error-p 双判。

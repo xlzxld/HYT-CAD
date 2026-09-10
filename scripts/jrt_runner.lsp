@@ -1,14 +1,20 @@
 ﻿;;; ============================================================================
-;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.34
-;;; v9.34  : 加热条封闭线独立图层 "JRTFBX"(用户需求): ①通用一直线帽的帽
-;;;          线(含 capr≈0 直角帽线与 capr>=半宽 的整弧替换帽)与通用二破口
-;;;          封闭线改放 "JRTFBX"(浅橙 21), 圆帽圆与帽角过渡弧仍在 "JRT";
-;;;          ②dt:jrt-snapshot/dt:jrt-diff 改 JRT+JRTFBX 并集 —— 裁剪/断口
-;;;          圆角/零长清理看到的实体集合与挪层前完全一致(帽线只被端头修
-;;;          剪, 原层保留); ③重跑幂等: 通用一清理扩 JRTFBX, 通用二句柄清
-;;;          理 member 扩 "JRTFBX"; ④回归 check_jrt2_out.py 口径改两层并
-;;;          集(几何不变, 断言数值不变)。同批: dt:ensure-layer 已存在图层
-;;;          也校正为登记色(全图层配色重排, 配合 flb v10.11)。
+;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.35
+;;; v9.35  : 通用一封闭线回退(需求澄清: 加热条封闭线只加在"出线口", 且仅
+;;;          通用二可实现 —— 通用一是"半成品"嵌套轮廓, 根本没有出线口,
+;;;          其直线帽封闭线属端帽, 与"出线口封闭线"不是一回事): 撤销
+;;;          v9.34 对通用一的全部改动 —— dt:jrt-cap-line 帽线回归 "JRT";
+;;;          dt:jrt-snapshot/dt:jrt-diff 与 dt:jrt-build 快照回归单层;
+;;;          通用一建层/重跑清理/完成提示语一并回退。保留: 通用二破口封
+;;;          闭线 "JRTFBX" + 全图层配色重排。
+;;; v9.34  : 加热条封闭线独立图层 "JRTFBX"(用户需求): ①通用二破口封闭线
+;;;          改放 "JRTFBX"(浅橙 21); ②[已回退, 见 v9.35] 通用一直线帽的
+;;;          帽线(含 capr≈0 直角帽线与 capr>=半宽 的整弧替换帽)同款改动,
+;;;          以及 dt:jrt-snapshot/dt:jrt-diff 并集 —— 误判为通用一也适用;
+;;;          ③重跑幂等: 通用二句柄清理 member 扩 "JRTFBX"(通用一清理扩
+;;;          JRTFBX 已于 v9.35 回退); ④回归 check_jrt2_out.py 口径改两层
+;;;          并集(几何不变, 断言数值不变)。同批: dt:ensure-layer 已存在图
+;;;          层也校正为登记色(全图层配色重排, 配合 flb v10.11)。
 ;;; v9.33  : 加载横幅精简为一行(命令教学移出加载期, 用户从菜单点击使用)
 ;;;          + 新增 *dt-jrt-ver* 版本单一来源 —— 横幅引用变量, 发版只改
 ;;;          头注与常量两处相邻位置(根治横幅版本号长期滞后, 本次 v9.29
@@ -240,9 +246,9 @@
 ;;;          端帽平面直接取 LD 端点平面推导。
 ;;; 图层   : "JRT" = 加热条(黄色 2, 产物同层; 通用一模板=纯产物层重跑全清;
 ;;;          通用二模板=源线层不清理, 上一轮产物按句柄记忆重跑先删)。
-;;;          "JRTFBX" = 加热条封闭线(浅橙 21, v9.34: 通用一直线帽的帽线/
-;;;          整弧替换帽 + 通用二破口封闭线放本层; 圆帽圆与帽角过渡弧仍在
-;;;          "JRT"; OFF 预建 15 层含本层, 重跑随产物一并清理)。
+;;;          "JRTFBX" = 加热条封闭线(浅橙 21, v9.34: 通用二破口封闭线放本
+;;;          层 —— 即加热条出线口封闭线; v9.35 通用一帽线已回退至 "JRT";
+;;;          OFF 预建 15 层含本层, 重跑随产物一并清理)。
 ;;;          "JRTDW" = 加热条定位图层(通用二: 标记每处出线口位置, 一条
 ;;;          线穿过外壁指向板边; v9.24 起内外方向由几何判定, 与其画向无
 ;;;          关, 仅在轮廓围合区域不可判定时作兜底基准)。
@@ -261,7 +267,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-jrt-ver* "v9.34")
+(setq *dt-jrt-ver* "v9.35")
 
 ;; 坑 #69(v9.17): 撤销组统一走 COM 标记 —— *error* 与普通代码都不再碰
 ;; (command); 无开放标记时 EndUndoMark 无副作用, 双重 catch 兜底
@@ -1123,12 +1129,9 @@
   (setq ss (ssget "X" (list (cons 8 layer))))
   (if ss (dt:ss->list ss) nil))
 
-;; 快照之后新增的 eName 列表(= 当前图上 JRT/JRTFBX 对象 - 快照)
-;; v9.34: 并集两层 —— 封闭线挪 "JRTFBX" 后, 裁剪/断口圆角/零长清理的
-;;        实体集合与挪层前一致(帽线只被端头修剪, 原层保留不重建)。
+;; 快照之后新增的 eName 列表(= 当前图上 JRT 对象 - 快照)
 (defun dt:jrt-diff (old / cur out e)
-  (setq cur (append (dt:jrt-snapshot "JRT") (dt:jrt-snapshot "JRTFBX"))
-        out nil)
+  (setq cur (dt:jrt-snapshot "JRT") out nil)
   (foreach e cur
     (if (not (member e old)) (setq out (cons e out))))
   (reverse out))
@@ -1312,8 +1315,6 @@
 ;;   - 封闭线圆角半径R < 半宽: 端点平面向内偏 inset 画直线封闭线,
 ;;     两端与测线解析法圆角(半径 = 封闭线圆角半径R), 侧线端头修到切点,
 ;;     裁掉端点平面方向多余段。
-;; v9.34: 封闭线本体(直线帽线/整弧替换帽)放 "JRTFBX" 加热条封闭线层;
-;;   两端圆角过渡弧与圆帽圆仍放 "JRT"。
 ;; plan = (obj et pt opt c style gap inward)
 (defun dt:jrt-cap-line (plan ents hw inset capr / et pt inward nrm walls wall
                         wallpt sign target cap-mid center tan1 tan2 p1 p2 ucap q1
@@ -1350,7 +1351,7 @@
       (if (>= rel sw)
         (setq tmp a1 a1 a2 a2 tmp))
       (setq arc (vla-addarc ms (vlax-3d-point center) hw a1 a2))
-      (vla-put-layer arc "JRTFBX"))
+      (vla-put-layer arc "JRT"))
     ;; ===== 直线 + 两端圆角模式 =====
     (progn
       (setq p1 (dt:pt+vec (dt:pt+vec pt inward inset) nrm (- hw))
@@ -1370,7 +1371,7 @@
         ;; 半径≈0: 直角直接相接
         (progn
           (setq ln (vla-addline ms (vlax-3d-point p1) (vlax-3d-point p2)))
-          (vla-put-layer ln "JRTFBX"))
+          (vla-put-layer ln "JRT"))
         (progn
           (setq sq2 (* capr (sqrt 2.0))
                 q1 (dt:pt+vec p1 ucap capr)
@@ -1379,9 +1380,9 @@
                 s2 (dt:pt+vec p2 inward capr)
                 o1 (dt:pt+vec p1 (dt:unit (mapcar '+ ucap inward)) sq2)
                 o2 (dt:pt+vec p2 (dt:unit (mapcar '- ucap inward)) sq2))
-          ;; 直线封闭线只画到两切点之间(v9.34: 放 "JRTFBX" 加热条封闭线层)
+          ;; 直线封闭线只画到两切点之间
           (setq ln (vla-addline ms (vlax-3d-point q1) (vlax-3d-point q2)))
-          (vla-put-layer ln "JRTFBX")
+          (vla-put-layer ln "JRT")
           ;; 两端 90° 圆角弧(劣弧)
           (foreach pair (list (list o1 q1 s1) (list o2 q2 s2))
             (setq a1 (angle (list (car (car pair)) (cadr (car pair)))
@@ -1490,7 +1491,7 @@
 ;; plans 来自 decide 环节(各层共用同一端帽形式)
 ;; 返回 (圆帽数 直线帽数)
 (defun dt:jrt-build (hw inset r capr plans / snap ents plan cnt-circle cnt-line)
-  (setq snap (append (dt:jrt-snapshot "JRT") (dt:jrt-snapshot "JRTFBX")))
+  (setq snap (dt:jrt-snapshot "JRT"))
   ;; 1) 偏移 LD → JRT(半宽 hw)
   (dt:offset-layer "LD" "JRT" hw)
   (setq ents (dt:jrt-diff snap))
@@ -3030,12 +3031,11 @@
               (setq doc    (vla-get-activedocument (vlax-get-acad-object))
                     layers (vla-get-layers doc))
               (dt:ensure-layer layers "JRT" 2 "黄色")
-              (dt:ensure-layer layers "JRTFBX" 21 "浅橙")
               (dt:jrt-undo-mark)
-              (setq total (+ (dt:purge-layer "JRT") (dt:purge-layer "JRTFBX")))
+              (setq total (dt:purge-layer "JRT"))
               (dt:jrt-undo-end)
               (princ (strcat "\n已清理上一轮产物 " (itoa total)
-                             " 个对象(\"JRT\"/\"JRTFBX\"图层)。"))
+                             " 个对象(\"JRT\"图层)。"))
               ;; 第 3 步: RZ 热咀圆检查(圆帽依赖; 缺失则全部直线帽)
               (setq rz (dt:layer-vlas "RZ"))
               (if (null rz)
@@ -3064,8 +3064,7 @@
               (if (< kmax (max 0 (fix *jrt-inner-count*)))
                 (princ "\n【提示】部分内层因半宽过小未生成。"))
               ;; 第 6 步: 统计输出
-              (princ (strcat "\n【完成】加热条半成品已生成 → \"JRT\"图层(黄色), "
-                             "封闭线 → \"JRTFBX\"(浅橙)。"
+              (princ (strcat "\n【完成】加热条半成品已生成 → \"JRT\"图层(黄色)。"
                              "共 " (itoa (1+ kmax)) " 层完整轮廓, LD 源线未改动。"
                              "模板: " (nth 0 (dt:jrt-template-row)) "。"))
             )
