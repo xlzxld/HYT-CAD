@@ -82,13 +82,30 @@ def endpoints(ent):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    # 两两扫描: --layer 的取值是它的下一参数, 不算位置参数
+    # (旧写法把带值选项的取值也收进位置参数, `--layer JD x.dxf` 会把
+    #  "JD" 当文件名, 裸 traceback)
+    argv = sys.argv[1:]
+    args = []
+    layers = {'JRT'}
+    i = 0
     # jrt v9.36 起破口封闭线本体在 "JRT"(JRTFBX 仅定位副本), 口径单层;
     # --layer 可改查其他单层。
-    layers = {'JRT'}
-    for i, a in enumerate(sys.argv[1:]):
-        if a == '--layer' and i + 2 < len(sys.argv):
-            layers = {sys.argv[i + 2]}
+    while i < len(argv):
+        a = argv[i]
+        if a == '--layer':
+            if i + 1 < len(argv):
+                layers = {argv[i + 1]}
+                i += 2
+            else:
+                print('错误: --layer 需要一个图层名参数')
+                return 2
+        elif a.startswith('--'):
+            print('错误: 未知选项 %r' % a)
+            return 2
+        else:
+            args.append(a)
+            i += 1
     if not args:
         print(__doc__)
         return 2

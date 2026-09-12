@@ -4,10 +4,13 @@ repos:
     hooks:
       - id: gitleaks
 
+  # entry 必须写包名 `@commitlint/cli`，不能写 `commitlint`——后者不是
+  # npm 包名，npx 会去下载一个不存在的包并直接失败，把提交堵死。
+  # 需先 `npm i -D @commitlint/cli @commitlint/config-conventional`。
   - repo: local
     hooks:
       - id: commitlint
         name: commitlint (Conventional Commits)
         language: system
-        entry: npx --no -- commitlint --edit
+        entry: npx --no -- @commitlint/cli --edit
         stages: [commit-msg]

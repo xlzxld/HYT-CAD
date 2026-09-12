@@ -6,6 +6,6 @@
 __all__ = ["FMT_CHECK_CMD", "LINT_CMD", "TEST_CMD", "BUILD_CMD"]
 
 FMT_CHECK_CMD = None
-LINT_CMD = "python tools/check_lisp.py scripts/cx_runner.lsp && python tools/check_lisp.py scripts/demo_recorder.lsp && python tools/check_lisp.py scripts/dt_start.lsp && python tools/check_lisp.py scripts/flb_runner.lsp && python tools/check_lisp.py scripts/jrt_runner.lsp && python tools/check_lisp.py scripts/wx_runner.lsp && python tools/check_sysvars.py && python tools/check_defun_depth.py"
+LINT_CMD = "python tools/check_lisp.py scripts/cx_runner.lsp && python tools/check_lisp.py scripts/demo_recorder.lsp && python tools/check_lisp.py scripts/dt_start.lsp && python tools/check_lisp.py scripts/flb_runner.lsp && python tools/check_lisp.py scripts/jrt_runner.lsp && python tools/check_lisp.py scripts/wx_runner.lsp && python tools/check_sysvars.py && python tools/check_defun_depth.py && python tools/check_layer_colors.py"
 TEST_CMD = "python tools/test_direction.py && python tools/check_audit_fixes.py"
-BUILD_CMD = "python tools/make_ansi.py"
+BUILD_CMD = "python tools/make_ansi.py --check"

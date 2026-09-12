@@ -30,9 +30,9 @@
 | 项 | 命令 / 取值 | 验证条件 |
 |---|---|---|
 | 技术栈 | AutoLISP（AutoCAD 2007~2026 双编码：`scripts\` UTF-8 with BOM，`scripts_ansi\` GBK）+ Python 3 纯标准库开发工具，无第三方依赖（本机 Python 3.14.6） | — |
-| 构建 (Build) | `python tools/make_ansi.py` | ✅ 退出码 0，产物正常生成；改完任何 .lsp 后、发版前必跑（生成 scripts_ansi GBK 副本并逐字节回读校验） |
+| 构建 (Build) | `python tools/make_ansi.py --check` | ✅ 退出码 0，产物正常生成；改完任何 .lsp 后、发版前先跑 `python tools/make_ansi.py` 重新生成（生成 scripts_ansi GBK 副本并逐字节回读校验），再跑本门禁确认副本无漂移 |
 | 测试 (Test) | `python tools/test_direction.py && python tools/check_audit_fixes.py` | ✅ 全绿；已知豁免清单内且非本次引入的失败不阻断，但须列出；check_jrt2_out.py 需 AutoCAD 出图后人工执行（阻断） |
-| 静态检查 (Lint) | `python tools/check_lisp.py scripts/cx_runner.lsp && python tools/check_lisp.py scripts/demo_recorder.lsp && python tools/check_lisp.py scripts/dt_start.lsp && python tools/check_lisp.py scripts/flb_runner.lsp && python tools/check_lisp.py scripts/jrt_runner.lsp && python tools/check_lisp.py scripts/wx_runner.lsp && python tools/check_sysvars.py && python tools/check_defun_depth.py` | ✅ 0 错误 0 警告；_audit.py / _collide.py 仅报告不阻断 |
+| 静态检查 (Lint) | `python tools/check_lisp.py scripts/cx_runner.lsp && python tools/check_lisp.py scripts/demo_recorder.lsp && python tools/check_lisp.py scripts/dt_start.lsp && python tools/check_lisp.py scripts/flb_runner.lsp && python tools/check_lisp.py scripts/jrt_runner.lsp && python tools/check_lisp.py scripts/wx_runner.lsp && python tools/check_sysvars.py && python tools/check_defun_depth.py && python tools/check_layer_colors.py` | ✅ 0 错误 0 警告；_audit.py / _collide.py 仅报告不阻断 |
 | 格式化 (Format) | 无 | ✅ 对本次改动文件执行，0 差异 |
 | 主干分支 | main | ✅ 单人项目直推口径，用户已确认允许直接向主干 push，不强制 PR |
 | 已知豁免清单 | 无 | 唯一合法的基线失败白名单，新增须走 PR；按 `命令:条目描述` 逐条登记，便于机器比对与复核 |

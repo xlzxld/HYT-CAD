@@ -6,7 +6,10 @@ Unicode LISP 正确解码)。≤2020 的 AutoCAD 是 MBCS(GBK) LISP, 其读取�
 规则解析文件 —— UTF-8 中文注释/字符串的字节会被当作 GBK 双字节字符吞掉后面
 的换行/引号/括号/点号, 破坏代码结构, 加载报「错误: 输入中的点位置不正确」。
 
-用法: python make_ansi.py   (改完任何 .lsp 后、发版前必跑)
+用法: python make_ansi.py          (改完任何 .lsp 后、发版前必跑: 重新生成)
+      python make_ansi.py --check  (门禁用: 只比对不写盘, scripts_ansi 落后于
+                                    scripts 时退出码 1 —— 防"改了原件忘重新
+                                    生成, GBK 副本仍是旧版"的漂移漏检)
 行为: scripts\\*.lsp -> scripts_ansi\\ 同名 GBK 副本(内容逐字同源, 仅注释与
       个别显示字符串里的 4 个非 GBK 装饰符号做等价替换), 并用"逐字节读取器
       模拟"校验副本与原件的字符串/括号结构完全一致; 任何一步失败即退出码 1。
@@ -135,21 +138,50 @@ def parse_bytes(data):
     return strings, bal, min_bal, errors
 
 
+def generate(fn):
+    """算出 fn 应生成的 GBK 字节(不落盘); 不可编码时返回 (None, None, 错误信息)"""
+    with open(os.path.join(SRC, fn), encoding='utf-8-sig') as f:
+        text = f.read()
+    for k, v in REPL.items():
+        text = text.replace(k, v)
+    try:
+        return text.encode('gbk'), text, None
+    except UnicodeEncodeError as e:
+        ch = text[e.start:e.end]
+        return None, None, ('存在 GBK 不可编码字符 %r(请在 REPL 表补等价替换)' % (ch,))
+
+
 def main():
+    check_only = '--check' in sys.argv[1:]
     ok = True
-    os.makedirs(DST, exist_ok=True)
+    if check_only:
+        print('== 校验模式(不写盘): scripts_ansi 是否与 scripts 同源 ==')
+    else:
+        os.makedirs(DST, exist_ok=True)
     for fn in FILES:
-        with open(os.path.join(SRC, fn), encoding='utf-8-sig') as f:
-            text = f.read()
-        for k, v in REPL.items():
-            text = text.replace(k, v)
-        try:
-            data = text.encode('gbk')
-        except UnicodeEncodeError as e:
-            ch = text[e.start:e.end]
-            print('[FAIL] %s: 存在 GBK 不可编码字符 %r(请在 REPL 表补等价替换)' % (fn, ch))
+        data, text, err = generate(fn)
+        if err is not None:
+            print('[FAIL] %s: %s' % (fn, err))
             ok = False
             continue
+
+        if check_only:
+            # 只比对: 副本缺失/字节不同 = 落后于原件(忘跑生成了)
+            dst_path = os.path.join(DST, fn)
+            if not os.path.isfile(dst_path):
+                print('[STALE] %s: scripts_ansi 缺该副本(请跑 python tools/make_ansi.py)' % fn)
+                ok = False
+                continue
+            with open(dst_path, 'rb') as f:
+                cur = f.read()
+            if cur == data:
+                print('%s: 副本与原件同源 -> OK' % fn)
+            else:
+                print('[STALE] %s: scripts_ansi 副本落后于 scripts 原件'
+                      '(请跑 python tools/make_ansi.py 重新生成)' % fn)
+                ok = False
+            continue
+
         with open(os.path.join(DST, fn), 'wb') as f:
             f.write(data)
 
@@ -172,9 +204,24 @@ def main():
     readme = README
     for k, v in REPL.items():
         readme = readme.replace(k, v)
-    with open(os.path.join(DST, '说明.txt'), 'w', encoding='gbk') as f:
-        f.write(readme)
-    print('结果:', 'ALL OK(说明.txt 已更新)' if ok else '存在问题')
+    readme_data = readme.encode('gbk')
+    if check_only:
+        rm_path = os.path.join(DST, '说明.txt')
+        with open(rm_path, 'rb') as f:
+            cur = f.read()
+        # 说明.txt 历史上按文本模式写出(Windows 下 \n -> \r\n), 比对前
+        # 双方归一换行, 只认内容漂移、不认换行差异
+        norm = lambda b: b.replace(b'\r\n', b'\n')
+        if norm(cur) == norm(readme_data):
+            print('说明.txt: 副本与生成源同源 -> OK')
+        else:
+            print('[STALE] 说明.txt: 落后于生成源(请跑 python tools/make_ansi.py)')
+            ok = False
+        print('结果:', 'ALL OK' if ok else '存在漂移')
+    else:
+        with open(os.path.join(DST, '说明.txt'), 'w', encoding='gbk') as f:
+            f.write(readme)
+        print('结果:', 'ALL OK(说明.txt 已更新)' if ok else '存在问题')
     sys.exit(0 if ok else 1)
 
 

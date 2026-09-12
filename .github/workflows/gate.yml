@@ -34,11 +34,20 @@ jobs:
 
       # 提交信息规范：只有存在本地钩子配置且装了依赖时才校验。
       # 没配就明确跳过（不会让 CI 误判为失败）。
+      # SHA 走 env 传递（不内插进 script）；首推/强推时 base 可能为全零 SHA，
+      # 此时无有效区间可比对，跳过校验而不是报难排查的错误。
       - name: 提交信息规范 (commitlint)
         if: ${{ hashFiles('.pre-commit-config.yaml', 'commitlint.config.js') != '' }}
+        env:
+          CL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CL_HEAD: ${{ github.sha }}
         run: |
           npm i -D @commitlint/cli@21.2.2 @commitlint/config-conventional@21.2.2
-          npx --no -- @commitlint/cli --from "${{ github.event.pull_request.base.sha || github.event.before }}" --to "${{ github.sha }}" --verbose
+          if [ -z "$CL_BASE" ] || echo "$CL_BASE" | grep -qE '^0+$'; then
+            echo "无有效 base SHA（首推/强推），跳过 commitlint 区间校验"
+            exit 0
+          fi
+          npx --no -- @commitlint/cli --from "$CL_BASE" --to "$CL_HEAD" --verbose
 
       # 聚合门禁：读 .agents/project.py（唯一命令源），逐条执行。
       # 内联实现而不是调 .agents/tsc.py——执行逻辑常驻技能目录、不进项目，
