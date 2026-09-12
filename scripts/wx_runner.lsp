@@ -320,10 +320,11 @@
          (if tmp
            (progn
              (setq f (open tmp "w"))
-             (write-line str f)
+             (princ str f) ; write-line 会附加换行, 粘贴进下料单多一个空行
              (close f)
-             (startapp (strcat "cmd.exe /c clip <\"" tmp "\""))
-             (vl-catch-all-apply 'vl-file-delete (list tmp)))))
+             ;; startapp 是异步的: cmd/clip 需几十毫秒才读文件, 立即删除会让
+             ;; 剪贴板内容丢失 —— 临时文件留在 %TEMP% 由系统清理, 不再删除
+             (startapp (strcat "cmd.exe /c clip <\"" tmp "\"")))))
       nil))
   T)
 
@@ -455,7 +456,7 @@
         (+ (* x sa) (* y ca))))
 
 ;; 双引擎闭合区域判定: Engine 1 (Region 面域) + Engine 2 (端点容差拓扑度数)
-(defun dt:sz-check-closed (cands / o oname sa res regs is-closed pts sp ep p clus found r)
+(defun dt:sz-check-closed (cands / o oname sa res regs is-closed pts sp ep p clus found r c)
   (setq is-closed nil
         *dt-sz-multi-regions* nil)
   (cond
@@ -519,7 +520,7 @@
 
 ;; 包络尺寸计算(兼顾正交与倾斜最佳 OBB 包络盒)
 (defun dt:sz-calc-box (cands / all-pts angs a pt rpt minx miny maxx maxy
-                               dx dy area best-area best-ang best-box
+                               dx dy area best-area best-box
                                aabb-area aabb-box rx0 ry0 rx1 ry1 len wid
                                p1 p2 p3 p4 o)
   (setq all-pts nil
@@ -530,7 +531,6 @@
   (setq angs (dt:sz-uniq-angles angs))
 
   (setq best-area nil
-        best-ang  0.0
         best-box  nil
         aabb-area nil
         aabb-box  nil)
@@ -553,7 +553,6 @@
                 aabb-box (list dx dy minx miny maxx maxy 0.0)))
         (if (or (null best-area) (< area best-area))
           (setq best-area area
-                best-ang  a
                 best-box  (list dx dy minx miny maxx maxy a))))))
 
   ;; 若 AABB 面积与最佳 OBB 面积相差在 1% 以内，优先采用正交(0.0)
@@ -1163,7 +1162,7 @@
 
 ;; 单条加热条完整性与结果输出; 通过返回 T, 取消/异常返回 nil
 (defun dt:sz-jrt-report (rec / nobjs nch nexcl total med ncirc lens chains kept
-                              nmiss minl clip)
+                              nmiss minl clip l)
   (setq nobjs (nth 0 rec)
         nch (nth 1 rec)
         nexcl (nth 2 rec)
@@ -1427,8 +1426,9 @@
 ;; 智能将长文件名格式化为多行文字 (遇 -、_、+、空格 或超长时自动拆分并以 \P 换行连接)
 (defun dt:sz-format-multiline (s / max-len len lines cur i ch l)
   (setq max-len 12) ; 每行建议字数
-  (setq len (strlen s))
-  (if (or (null s) (<= len max-len))
+  ;; nil 判定在前(or 短路), strlen 不再对 nil 求值 —— 此前先 (strlen s) 后判
+  ;; nil, s 为 nil 直接抛 bad argument type
+  (if (or (null s) (<= (setq len (strlen s)) max-len))
     s
     (progn
       (setq lines nil cur "" i 1)
@@ -1515,7 +1515,7 @@
 
 ;; v2.8: 目标图纸中把 src-layers 图层上的所有模型空间实体移入 dst-layer,
 ;; 然后删除这些原图层(空层才能删, 删不掉 catch 跳过)。
-(defun dt:sz-migrate-layers (doc dst-layer src-layers / ms n i o lay done)
+(defun dt:sz-migrate-layers (doc dst-layer src-layers / ms n i o lay done ln)
   (setq ms (vla-get-modelspace doc)
         n  (vla-get-count ms)
         i  0
@@ -1653,6 +1653,10 @@
       (foreach o objs
         (setq e (vlax-vla-object->ename o))
         (if e (setq ss (ssadd e ss))))
+      ;; command-s/vl-cmdf 把命令发给"当前活动文档": 目标图纸被 vla-open 激活
+      ;; 后活动文档已非本函数图元所在文档, 跨文档执行会改错图 —— 先激活再保底
+      (vl-catch-all-apply 'vla-activate
+        (list (vla-get-document (car objs))))
       (setq last-e (entlast))
       (if (boundp 'command-s)
         (command-s "_.MIRROR" ss "" p1 p2 "_N")
@@ -1690,7 +1694,7 @@
                             front-objs back-objs export-objs o c
                             src-bb s-minx s-miny s-maxx s-maxy part-w part-h
                             off-x off-y sa r
-                            tmp-dir tmp-dwg w-res blk exp-res
+                            tmp-dwg w-res blk exp-res
                             keep-front keep-back lay-name
                             src-fname src-multiline title-cx title-cy title-w txt-obj save-res
                             box-gap per-row text-gap box-margin

@@ -1,5 +1,5 @@
 ﻿;;; ============================================================================
-;;; dt_start.lsp  v3.5 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.6 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -430,7 +430,7 @@
 ;; dir 移出支持文件搜索路径
 (defun dt:st-del-support (dir / r)
   (setq r (vl-catch-all-apply
-            '(lambda ( / prefs old items keep)
+            '(lambda ( / prefs old items keep p)
                (setq prefs (vla-get-files
                              (vla-get-preferences (vlax-get-acad-object)))
                      old (vla-get-supportpath prefs))

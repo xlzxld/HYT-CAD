@@ -47,7 +47,7 @@ def check(cid, desc, fn):
 # (dt:poly-pts 与 dt:seg-rebuild 各一; cut-curve 闭合检查本就双名, 不计)。
 # ---------------------------------------------------------------------------
 BAD_IS2D = re.compile(
-    r'=\s*(\(vla-get-objectname obj\)|obj-type)\s*"AcDbLWPolyline"')
+    r'=\s*(?:\(vla-get-objectname\s+\w+\)|\w+)\s*"AcDbLWPolyline"')
 GOOD_IS2D = re.compile(
     r"member\s*(?:\(vla-get-objectname obj\)|obj-type)"
     r"\s*'\(\"AcDbLWPolyline\" \"AcDbPolyline\"\)")

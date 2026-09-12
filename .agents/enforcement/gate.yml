@@ -1,3 +1,5 @@
+# 已废弃: 本文件是早期模板留存, 不参与 CI。生效的流水线在
+# .github/workflows/gate.yml —— 改门禁请改那边, 别改这里。
 name: gate
 on:
   pull_request:

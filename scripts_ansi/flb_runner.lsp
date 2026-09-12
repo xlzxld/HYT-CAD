@@ -2282,7 +2282,9 @@
                         (vlax-safearray->list
                           (vlax-variant-value (vla-get-endpoint o))))
          (setq pairs (cons (list p (vla-get-Handle o)) pairs))))
-      ((= typ "AcDbLWPolyline")
+      ((member typ '("AcDbPolyline" "AcDb2dPolyline" "AcDb3dPolyline"))
+       ;; v10.7 坑 A-02 同族漏改: LWPolyline 的 ObjectName 实为 "AcDbPolyline",
+       ;; 单名等式恒假 → 多段线顶点静默落空, 流道拐点漏检
        (foreach p (dt:poly-pts o)
          (setq pairs (cons (list p (vla-get-Handle o)) pairs))))))
   (setq out nil)
@@ -2617,7 +2619,7 @@
               (princ "\n【假体】传统逐步流程: 偏移50 → 裁剪 → 断口圆角 → 延长15 → 封口 → 封口圆角。")
               (dt:offset-layer src-layer hole-layer hole-dist)
               (dt:trim-all hole-dist hole-layer)
-              (dt:fillet-all offset-dist hole-layer)
+              (dt:fillet-all hole-dist hole-layer)
               (setq res-off (dt:extend-ends hole-layer hole-extend hole-dist))
               (princ (strcat "\n【假体】延长与封闭线连接的假体线端头 "
                              (rtos hole-extend 2 0) ", 共处理 "

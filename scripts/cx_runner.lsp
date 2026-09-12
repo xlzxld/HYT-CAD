@@ -1482,7 +1482,7 @@
         (+ (cadr o) (* (cadr u) ly) (* (cadr nrm) lx))
         0.0))
 
-(defun dt:cx-yxb-draw (o u nrm layer / a1 hand ents e t1 t2)
+(defun dt:cx-yxb-draw (o u nrm layer / a1 hand ents e t1 t2 ent)
   ;; v11.7: 本地系(+X→nrm, +Y→u)在 nrm=rot90ccw(u)(左壁侧, 外法向未翻转)
   ;; 是左手系(det=-1, 镜像) —— 直线镜像后仍精确, 但弧角按纯旋转 +a1 会各
   ;; 偏 90°, 两条 R4.3 过渡弧接不上上下边线(1.dxf 实测 42/42 板全数断开;
@@ -1731,8 +1731,8 @@
 ;;   源线 S→E, 排除源线自身)。
 ;;   返回 (直段列表 弧段数 不平行数 侧不符数 垂距不符数 垂距最小偏差)
 (defun dt:cx-yxb-find-walls (src slot-layer src-enames side slot-dist /
-                             ss2 ee2 ds dl o segs sp ep m vd vl dd dderr
-                             sidev pieces n-arc n-notpar n-side n-dist dmin)
+                             ss2 ee2 ds dl o sp ep m vd vl dd dderr
+                             sidev pieces n-arc n-notpar n-side n-dist dmin seg)
   (setq ss2 (vlax-curve-getstartpoint src)
         ee2 (vlax-curve-getendpoint src)
         ss2 (list (nth 0 ss2) (nth 1 ss2) 0.0)

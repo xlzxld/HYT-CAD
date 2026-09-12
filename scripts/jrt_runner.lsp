@@ -2255,7 +2255,7 @@
 (defun dt:jrt2-hook-one (stub srcs halfw r ext / typ sa ea d ul ch1 ch2 wall
                             pu pl pw e-out p-out region s-in s-out oe1 oe2
                             w1 w2 r1 r2 arc1 arc2 tu tl fp1 fp2 cutp pa pb pe
-                            p1 p2 nch1 nch2 out)
+                            p1 p2 nch1 nch2 o s out)
   (setq typ (vla-get-objectname stub))
   (cond
     ((/= typ "AcDbLine")

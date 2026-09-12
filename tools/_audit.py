@@ -157,7 +157,10 @@ def bound_symbols(body):
             head = tk[i+1] if i + 1 < n else ''
             inner = tk[i+1:j]
             if head == 'setq':
+                # setq 是 (sym value sym value ...) 交替结构: 只收集符号槽位。
+                # 此前把值槽位的裸符号(nil/T/字面量)也当绑定收进来, 全是噪音
                 k = 1
+                want_name = True
                 while k < len(inner):
                     if inner[k] == '(':
                         d = 0
@@ -169,14 +172,20 @@ def bound_symbols(body):
                                 if d == 0:
                                     break
                             k += 1
+                        want_name = not want_name  # 表达式占掉一个槽位
                     elif inner[k] != ')':
-                        out.add(inner[k])
+                        if want_name:
+                            out.add(inner[k])
+                        want_name = not want_name
                     k += 1
             elif head == 'foreach':
                 if len(inner) > 1:
                     out.add(inner[1])
             elif head == 'lambda':
-                b = 2
+                # inner[0]='lambda', inner[1]='(' 参数表开括号, inner[2]=首个参数。
+                # 此前 b=2 起步还要求 inner[b]=='(' —— 永不成立, lambda 参数
+                # 收集从未生效, 已声明的局部被大量误报为全局泄漏
+                b = 1
                 if b < len(inner) and inner[b] == '(':
                     b += 1
                     while b < len(inner) and inner[b] != ')':
@@ -187,6 +196,20 @@ def bound_symbols(body):
             i = j + 1
         else:
             i += 1
+    return out
+
+
+def lambda_scoped(body):
+    """lambda 参数表(含 / 后局部)里出现过的符号。它们是 lambda 局部:
+    setq 到这些符号既不进全局也不进 defun 局部, 第 3 项不应报告。"""
+    out = set()
+    for i, t in enumerate(body[:-1]):
+        if t == 'lambda' and body[i + 1] == '(':
+            j = i + 2
+            while j < len(body) and body[j] != ')':
+                if body[j] != '/':
+                    out.add(body[j])
+                j += 1
     return out
 
 
@@ -237,9 +260,12 @@ def main():
     for f in FILES:
         for n, info in sorted(all_defs[f].items(), key=lambda x: x[1]['line']):
             declared = set(info['params']) | set(info['locals'])
+            lam = lambda_scoped(info['body'])
             leak = sorted(v for v in bound_symbols(info['body'])
                           if v not in declared
+                          and v not in lam
                           and not v.startswith('*')
+                          and not v.startswith('dt:')  # dt: 前缀 = 模块级共享状态(命名空间约定)
                           and not re.match(r'^[-\d.]', v)
                           and v != '""')
             if leak:
