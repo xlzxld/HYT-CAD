@@ -8,6 +8,12 @@
 ;;;      - AABB + OBB 最佳外包矩形算法，精准计算最长边(Length)与最宽边(Width)
 ;;;      - 测量结果自动写入 Windows 剪贴板 (如 "350*180"，可直接 Ctrl+V 粘贴进下料单)
 ;;;      - 交互式确认后在 FLB_BOX 图层绘制包络矩形与长宽标注(字高>=15)
+;;;   1b. 加热条(JRT)长度测量 (c:JRTSZ)
+;;;      - 自动识别 JRT 图层加热条(空间聚类分条)，多条时列出清单点选、可连续测量
+;;;      - 长度 = 嵌套轮廓线长度中位数(等价"总长/条数"，对个别短链更稳健)
+;;;      - 自动排除破口封闭线: 优先 JRTFBX 定位副本精确匹配，无副本时几何识别
+;;;      - 检测不到/仅1条开口线/端点断口 0.01~2mm → 弹窗提示并取消，不降级手动选择
+;;;      - 结果自动写入 Windows 剪贴板
 ;;;   2. 线切割外协出图 (c:XQG)
 ;;;      - 自动提取闭合 FLB 轮廓，未闭合转手动框选并校验闭合度
 ;;;      - 跨图纸复制到新建或追加汇总 DWG，自动 AABB 向右平铺(安全间距 50mm)防覆盖
@@ -20,7 +26,35 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.14
+;;; 版本: v2.17
+;;; v2.17 : 归堆间距可配(用户需求): wx_runner.ini 新 [测量加热条] 节
+;;;         strip_gap(默认 15.0) —— 全部 JRT 曲线按"最小间距 <= strip_gap"
+;;;         归成一根根加热条; 误填 <1 按默认 15 处理(防把一根条的嵌套线
+;;;         拆散)。逻辑零变化(默认值与 v2.16 一致)。
+;;; v2.16 : 修 v2.15(未交付, 用户实测后废弃其识别方案)实测缺陷: 结果成了
+;;;         "三层线加一起没除" —— 几何识别兜底在用户图上没认出封闭线,
+;;;         三层线被封闭线连成一串后被当成"一条线"量了总长。按用户定案
+;;;         重做封闭线排除: "生成时怎么画封闭线, 测量时就怎么认" ——
+;;;         · 只剔封闭线本身, 圆弧一律不再连带剔除(v2.15 的相切弧带出废除);
+;;;         · 几何复核 = 生成规则的反推: 生成时封闭线就是把最外层与最内层
+;;;           线头连起来的短直线(两头各一根), 反推 = 条内"两头都接在别的
+;;;           线上"的短直线当候选, 试着剔除 —— 剔掉后其余线恰能分成"几条
+;;;           长度几乎一样"的线链(嵌套轮廓该有的样子)才确认; 剔掉后线链
+;;;           长短反而更乱的(普通轮廓短段被误去的样子)一律不动。封闭线
+;;;           两头成对, 单根不见分晓时自动改试"成对剔除"(只试最短 12 根
+;;;           候选, 防组合爆炸); v2.15 的"连通分量数不增加就整体放弃"与
+;;;           "近垂直横档切向过滤"一并废除;
+;;;         · 每条都跑几何复核(不再只在无 JRTFBX 时启用) —— JRTFBX 只匹配
+;;;           到一半时剩下的那根也能补剔;
+;;;         · 结果输出加"各层线长"明细与"各层长度差异偏大请人工核对"警告;
+;;;         · 圆帽整圆(无端点)与侧线切点补"端点贴线身"相接判定(通用一
+;;;           圆帽条此前会被拆散成侧线+整圆各算一条);
+;;;         · 输出措辞改大白话("N 层嵌套线各量一遍取中间值")。
+;;; v2.15 : 新增测量加热条长度 (c:JRTSZ, 菜单「外协加工▸测量加热条长度」,
+;;;         与测量分流板同级, 用户需求): 长度=各层嵌套线取中间值; 封闭线
+;;;         排除 = JRTFBX 副本精确匹配 + 几何识别兜底; 多条列表点选连测;
+;;;         检测不到/仅 1 条开口线/端点断口 0.01~2mm → 弹窗取消不降级;
+;;;         结果写剪贴板; 只读测量不建图层。(其几何识别方案被 v2.16 替换)
 ;;; v2.14 : 修 v2.13 实测缺陷(用户截图: 同一行各幅 Y 乱飘 + 永不换行):
 ;;;         根因 = v2.13 用"目标图里 MText 的 boundingbox"算行顶/行右缘, 而
 ;;;         AutoCAD 对**非活动文档**中刚 CopyObjects 过去的 MText, 实体范围
@@ -127,7 +161,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.14")
+(setq *dt-wx-ver* "v2.17")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -645,6 +679,534 @@
           (if (and (not (vl-catch-all-error-p txt2)) txt2)
             (vla-put-layer txt2 "FLB_BOX"))))))
   T)
+
+;; ============================================================================
+;; 二.5、加热条(JRT)长度测量核心 (v2.16)
+;;   口径: 一根加热条 = 若干层嵌套轮廓线(生成时是一条轮廓向内偏移 N 次画
+;;         出来的), 各层长度天生几乎相等 —— 每层各量一遍, 取**中间值**作
+;;         为这根加热条的长度。
+;;   封闭线排除(双通道, 用户定案: 只剔封闭线本身, 圆弧一律不动):
+;;     (1) JRTFBX 副本精确匹配(优先): v9.36 起通用二破口封闭线本体在 JRT、
+;;         同几何定位副本在 JRTFBX —— JRT 直线与副本直线两端点均重合(<0.5)
+;;         即剔除;
+;;     (2) 几何复核(生成规则的反推): 生成时封闭线 = 把最外层与最内层的
+;;         线头连起来的短直线(两头各一根)。反推 = 条内"两头都接在别的
+;;         线上"的短直线先当候选, 试着剔除 —— 剔掉后其余线恰能分成
+;;         "几条长度几乎一样"的线链(嵌套轮廓该有的样子)才确认; 剔掉后
+;;         线链长短反而更乱的(普通轮廓短段被误去的样子)一律不动。
+;;   分条(归堆): 全部曲线按最小间距归堆(可配: wx_runner.ini [测量加热条]
+;;         strip_gap, 默认 15, 误填 <1 按默认处理) —— 同一根条的三层线彼此
+;;         只差一步长(默认 4), 必归一堆; 不同加热条之间隔得远, 各归各堆。
+;;   完整性(异常→弹窗取消, 不降级手动选择): 检测不到 JRT 曲线 / 仅 1 条
+;;         开口线 / 端点间距 0.01~2mm 的断口。
+;; ============================================================================
+
+;; 曲线长度(端参数处距离; 失败返回 0)
+(defun dt:sz-jrt-curve-len (e / r p)
+  (setq r (vl-catch-all-apply
+            '(lambda ( )
+               (setq p (vlax-curve-getendparam e))
+               (vlax-curve-getdistatparam e p))
+            nil))
+  (if (or (vl-catch-all-error-p r) (null r) (not (numberp r)))
+    0.0
+    r))
+
+;; 曲线端点表 (起点 终点); 整圆/闭合多段线(起终点重合)返回 nil(视为无端点)
+(defun dt:sz-jrt-ends (e / s r)
+  (setq s (vl-catch-all-apply 'vlax-curve-getstartpoint (list e))
+        r (vl-catch-all-apply 'vlax-curve-getendpoint (list e)))
+  (if (and (not (vl-catch-all-error-p s)) (not (vl-catch-all-error-p r)) s r
+           (> (distance s r) 0.01))
+    (list s r)
+    nil))
+
+;; 两曲线是否相接(模型用, 端点已缓存于 rec 行): 端点重合(<tol)即相接;
+;; 一方"无端点"(整圆/闭合多段线)时, 对方端点落在其线身上(<tol)也算相接
+;; —— 通用一圆帽整圆与侧线的切点连接靠这条; 嵌套层间距=步长(默认4)
+;; 远大于 tol, 不会误连。rec 行 = (ename 端点表 长度 是否直线)
+(defun dt:sz-jrt-adj-p (ri rj tol / touch a b q)
+  (setq touch nil)
+  (foreach a (nth 1 ri)
+    (foreach b (nth 1 rj)
+      (if (< (distance a b) tol) (setq touch T))))
+  (if (null touch)
+    (cond
+      ((null (nth 1 rj))
+       (foreach a (nth 1 ri)
+         (if (null touch)
+           (progn
+             (setq q (vl-catch-all-apply 'vlax-curve-getclosestpointto
+                                         (list (car rj) a)))
+             (if (and (not (vl-catch-all-error-p q)) q
+                      (< (distance a q) tol))
+               (setq touch T))))))
+      ((null (nth 1 ri))
+       (foreach b (nth 1 rj)
+         (if (null touch)
+           (progn
+             (setq q (vl-catch-all-apply 'vlax-curve-getclosestpointto
+                                         (list (car ri) b)))
+             (if (and (not (vl-catch-all-error-p q)) q
+                      (< (distance b q) tol))
+               (setq touch T))))))))
+  touch)
+
+;; 下标连通分量: 按邻接表聚合(skip 中的下标不参与); 返回下标列表的列表
+(defun dt:sz-jrt-comps-i (n adj skip / labels changed i j li lj lab out seen g)
+  (setq labels nil
+        i 0)
+  (while (< i n)
+    (setq labels (cons (if (member i skip) -1 i) labels)
+          i (1+ i)))
+  (setq labels (reverse labels)
+        changed T)
+  (while changed
+    (setq changed nil
+          i 0)
+    (while (< i n)
+      (setq li (nth i labels))
+      (if (/= li -1)
+        (foreach j (nth i adj)
+          (setq lj (nth j labels))
+          (if (and (/= lj -1) (/= lj li))
+            (progn
+              (setq lab (min li lj))
+              (setq labels (mapcar
+                             '(lambda (L)
+                                (if (or (= L li) (= L lj)) lab L))
+                             labels))
+              (setq li lab)
+              (setq changed T)))))
+      (setq i (1+ i))))
+  (setq out nil
+        seen nil
+        i 0)
+  (while (< i n)
+    (setq lab (nth i labels))
+    (if (and (/= lab -1) (not (member lab seen)))
+      (progn
+        (setq seen (cons lab seen)
+              g nil
+              j 0)
+        (while (< j n)
+          (if (= (nth j labels) lab)
+            (setq g (cons j g)))
+          (setq j (1+ j)))
+        (setq out (cons (reverse g) out))))
+    (setq i (1+ i)))
+  (reverse out))
+
+;; 给定剔除表 skip, 算各线链的长度表
+(defun dt:sz-jrt-lens-at (recs adj n skip / comps lens l comp i)
+  (setq comps (dt:sz-jrt-comps-i n adj skip)
+        lens nil)
+  (foreach comp comps
+    (setq l 0.0)
+    (foreach i comp
+      (setq l (+ l (nth 2 (nth i recs)))))
+    (setq lens (cons l lens)))
+  (reverse lens))
+
+;; 线链"整齐度": 各链长度相对中间值的极差。单链=1(还没分出嵌套层),
+;; 空=2(异常); 嵌套轮廓各层长度天生几乎相等 → 越接近 0 越像"几层嵌套线"。
+(defun dt:sz-jrt-spread (lens / mn mx med)
+  (cond
+    ((null lens) 2.0)
+    ((= (length lens) 1) 1.0)
+    (T
+     (setq med (dt:sz-jrt-median lens)
+           mn (apply 'min lens)
+           mx (apply 'max lens))
+     (if (and med (> med 1e-6))
+       (/ (- mx mn) med)
+       2.0))))
+
+;; 候选资格: 直线两头各自都与其他曲线的端点重合 —— 生成时封闭线就是
+;; 接在最外层/最内层的"线头"(自由端)上, 中间层的线头由它跨过不接触
+(defun dt:sz-jrt-joined-p (rec recs / ends p ok r q e2)
+  (setq ends (nth 1 rec)
+        ok (and ends (= (length ends) 2)))
+  (foreach p ends
+    (setq r nil)
+    (foreach q recs
+      (if (and (null r) (not (equal (car q) (car rec))))
+        (foreach e2 (nth 1 q)
+          (if (and (null r) (< (distance p e2) 0.5))
+            (setq r T)))))
+    (if (null r)
+      (setq ok nil)))
+  ok)
+
+;; 两曲线最小间距(双向各 5 个等参采样点向对方曲线投影求最近)
+(defun dt:sz-jrt-min-dist (e1 e2 / r pair np i par p q)
+  (setq r 1e99)
+  (foreach pair (list (list e1 e2) (list e2 e1))
+    (setq np (vl-catch-all-apply 'vlax-curve-getendparam (list (car pair))))
+    (if (and (not (vl-catch-all-error-p np)) (numberp np))
+      (progn
+        (setq i 0)
+        (while (<= i 4)
+          (setq par (* np i 0.25)
+                p (vl-catch-all-apply 'vlax-curve-getpointatparam
+                                      (list (car pair) par)))
+          (if (and (not (vl-catch-all-error-p p)) p)
+            (progn
+              (setq q (vl-catch-all-apply 'vlax-curve-getclosestpointto
+                                          (list (cadr pair) p)))
+              (if (and (not (vl-catch-all-error-p q)) q)
+                (if (< (distance p q) r) (setq r (distance p q))))))
+          (setq i (1+ i))))))
+  r)
+
+;; 单实体包围盒 (minx miny maxx maxy); 失败返回 nil
+(defun dt:sz-jrt-obj-bbox (e / o mn mx r p q)
+  (setq o (vlax-ename->vla-object e)
+        mn nil
+        mx nil)
+  (setq r (vl-catch-all-apply 'vla-getboundingbox (list o 'mn 'mx)))
+  (if (and (not (vl-catch-all-error-p r)) mn mx)
+    (progn
+      (setq p (dt:rect-bb-pts mn)
+            q (dt:rect-bb-pts mx))
+      (list (car p) (cadr p) (car q) (cadr q)))
+    nil))
+
+;; 两包围盒间距(不相交为正的欧氏距离, 相交/含套为 0)
+(defun dt:sz-jrt-bb-gap (b1 b2 / dx dy)
+  (setq dx (max (- (car b1) (nth 2 b2)) (- (car b2) (nth 2 b1)) 0.0)
+        dy (max (- (cadr b1) (nth 3 b2)) (- (cadr b2) (nth 3 b1)) 0.0))
+  (sqrt (+ (* dx dx) (* dy dy))))
+
+;; 空间单链聚类: 曲线间最小间距<=gap 归为同一条加热条(嵌套层间距=步长,
+;; 远小于 gap; 不同加热条物理间距远大于 gap)。返回 ename 列表的列表。
+(defun dt:sz-jrt-strips (objs gap / n labels bbs changed i j li lj lab out seen g
+                                b1 b2)
+  (setq n (length objs)
+        labels nil
+        bbs nil
+        i 0)
+  (while (< i n)
+    (setq labels (cons i labels)
+          bbs (cons (dt:sz-jrt-obj-bbox (nth i objs)) bbs)
+          i (1+ i)))
+  (setq labels (reverse labels)
+        bbs (reverse bbs)
+        changed T)
+  (while changed
+    (setq changed nil
+          i 0)
+    (while (< i n)
+      (setq j (1+ i))
+      (while (< j n)
+        (setq li (nth i labels)
+              lj (nth j labels)
+              b1 (nth i bbs)
+              b2 (nth j bbs))
+        (if (and (/= li lj) b1 b2
+                 (<= (dt:sz-jrt-bb-gap b1 b2) gap)
+                 (<= (dt:sz-jrt-min-dist (nth i objs) (nth j objs)) gap))
+          (progn
+            (setq lab (min li lj))
+            (setq labels (mapcar
+                           '(lambda (L)
+                              (if (or (= L li) (= L lj)) lab L))
+                           labels))
+            (setq changed T)))
+        (setq j (1+ j)))
+      (setq i (1+ i))))
+  (setq out nil
+        seen nil
+        i 0)
+  (while (< i n)
+    (setq lab (nth i labels))
+    (if (not (member lab seen))
+      (progn
+        (setq seen (cons lab seen)
+              g nil
+              j 0)
+        (while (< j n)
+          (if (= (nth j labels) lab)
+            (setq g (cons (nth j objs) g)))
+          (setq j (1+ j)))
+        (setq out (cons (reverse g) out))))
+    (setq i (1+ i)))
+  (reverse out))
+
+;; JRT 直线与 JRTFBX 副本直线两端点(无序)均重合(<0.5) → 视为破口封闭线本体。
+;; 返回 JRT 侧应剔除的 ename 列表。
+(defun dt:sz-jrt-fbx-match (objs fbx / out e hit a b f c d)
+  (setq out nil)
+  (foreach e objs
+    (if (= (cdr (assoc 0 (entget e))) "LINE")
+      (progn
+        (setq a (vlax-curve-getstartpoint e)
+              b (vlax-curve-getendpoint e)
+              hit nil)
+        (foreach f fbx
+          (if (and (null hit) (= (cdr (assoc 0 (entget f))) "LINE"))
+            (progn
+              (setq c (vlax-curve-getstartpoint f)
+                    d (vlax-curve-getendpoint f))
+              (if (or (and (< (distance a c) 0.5) (< (distance b d) 0.5))
+                      (and (< (distance a d) 0.5) (< (distance b c) 0.5)))
+                (setq hit T)))))
+        (if hit (setq out (cons e out)))))
+  out))
+
+;; 找破口封闭线(生成规则的反推, 用户定案: 只剔封闭线本身, 圆弧一律不动):
+;;   生成时封闭线 = 把最外层与最内层的线头连起来的短直线(一头一根);
+;;   反推 = 条内"两头都接在别的线上"的短直线先当候选, 试着剔除 ——
+;;   剔掉后其余线恰能分成"几条长度几乎一样"的线链(生成就是一条轮廓向内
+;;   偏移 N 次, 各层长度天生几乎相等)才确认; 剔掉后线链长短反而更乱的
+;;   (普通轮廓短段被误去的样子)一律不动。封闭线两头成对, 所以单根不见
+;;   分晓时再试"成对剔除"。
+;; recs/adj/n 见 dt:sz-jrt-strip-rec; 返回应剔除的下标表(可能为 nil)
+(defun dt:sz-jrt-close-pick (recs adj n / total lim cands i r skip cur s
+                                  trial improved p1 p2 j kmax lens)
+  (setq total 0.0)
+  (foreach r recs
+    (setq total (+ total (nth 2 r))))
+  ;; 候选: 直线 + 两头都接在别的线上 + 短(封闭线只跨"层距×层数", 占全条
+  ;; 零头; 上限 max(6%全条长, 40) 保证层数/步长参数不同也罩得住)
+  (setq lim (max (* 0.06 total) 40.0)
+        cands nil
+        i 0)
+  (while (< i n)
+    (setq r (nth i recs))
+    (if (and (nth 3 r)
+             (> (nth 2 r) 0.01)
+             (< (nth 2 r) lim)
+             (dt:sz-jrt-joined-p r recs))
+      (setq cands (cons i cands)))
+    (setq i (1+ i)))
+  (setq cands (reverse cands))
+  (if (null cands)
+    nil
+    (progn
+      (setq skip nil
+            cur (dt:sz-jrt-spread (dt:sz-jrt-lens-at recs adj n nil))
+            improved T)
+      (while improved
+        (setq improved nil)
+        ;; 单根试剔(JRTFBX 已剔一根时, 剩下那根单剔就见分晓)
+        (setq i 0)
+        (while (and (null improved) (< i (length cands)))
+          (setq r (nth i cands))
+          (if (not (member r skip))
+            (progn
+              (setq trial (cons r skip)
+                    lens (dt:sz-jrt-lens-at recs adj n trial)
+                    s (dt:sz-jrt-spread lens))
+              (if (and lens
+                       (< s (- cur 0.01))
+                       (>= (/ (apply 'min lens) (apply 'max lens)) 0.8))
+                (setq skip trial
+                      cur s
+                      improved T))))
+          (setq i (1+ i)))
+        ;; 成对试剔(封闭线两头各一根, 必须一起去掉才见分晓; 只试最短的
+        ;; 12 根候选 —— 封闭线必是其中之一, 免得组合爆炸)
+        (if (null improved)
+          (progn
+            (setq kmax (min 12 (length cands))
+                  i 0)
+            (while (and (null improved) (< i kmax))
+              (setq j (1+ i))
+              (while (and (null improved) (< j kmax))
+                (setq p1 (nth i cands)
+                      p2 (nth j cands))
+                (if (and (not (member p1 skip)) (not (member p2 skip)))
+                  (progn
+                    (setq trial (cons p1 (cons p2 skip))
+                          lens (dt:sz-jrt-lens-at recs adj n trial)
+                          s (dt:sz-jrt-spread lens))
+                    (if (and lens
+                             (< s (- cur 0.01))
+                             (>= (/ (apply 'min lens) (apply 'max lens)) 0.45))
+                      (setq skip trial
+                            cur s
+                            improved T))))
+                (setq j (1+ j)))
+              (setq i (1+ i))))))
+      skip)))
+
+;; 断口检测: 不同曲线端点对间距落在 (0.01, 2.0] 的对数(健康产物应为 0;
+;; 上界 2.0 取嵌套层端头最小步距之下, 防相邻层端头误报)
+(defun dt:sz-jrt-nearmiss (objs / r i j e f a b d)
+  (setq r 0
+        i 0)
+  (while (< i (length objs))
+    (setq j (1+ i))
+    (while (< j (length objs))
+      (setq e (nth i objs)
+            f (nth j objs))
+      (foreach a (dt:sz-jrt-ends e)
+        (foreach b (dt:sz-jrt-ends f)
+          (setq d (distance a b))
+          (if (and (> d 0.01) (<= d 2.0)) (setq r (1+ r)))))
+      (setq j (1+ j)))
+    (setq i (1+ i)))
+  r)
+
+;; 链是否闭合: 链内每个端点都能在链内其他曲线上找到相接端点(<0.5);
+;; 无端点实体(整圆/闭合多段线)视为闭合
+(defun dt:sz-jrt-chain-closed-p (chain / r o e cnt f fe)
+  (setq r T)
+  (foreach o chain
+    (foreach e (dt:sz-jrt-ends o)
+      (setq cnt 0)
+      (foreach f chain
+        (if (not (eq f o))
+          (foreach fe (dt:sz-jrt-ends f)
+            (if (< (distance e fe) 0.5) (setq cnt (1+ cnt))))))
+      (if (= cnt 0) (setq r nil))))
+  r)
+
+;; 数值列表中位数(偶数个取中间两数均值)
+(defun dt:sz-jrt-median (nums / s n)
+  (setq s (vl-sort nums '<)
+        n (length s))
+  (cond
+    ((= n 0) nil)
+    ((= 0 (rem n 2)) (/ (+ (nth (- (/ n 2) 1) s) (nth (/ n 2) s)) 2.0))
+    (T (nth (/ n 2) s))))
+
+;; 单条加热条 -> 测量记录 (曲线数 线数 封闭线数 总长 长度 整圆数
+;;                        各线长表 链表 计入实体表 原条实体表)
+;; 流程: 先扣掉 JRTFBX 精确命中的封闭线 → 剩余曲线建模型(缓存端点/邻接)
+;;       → 几何复核剔除(生成规则反推, dt:sz-jrt-close-pick) → 剩下的线按
+;;       "头碰头"分成各层嵌套线 → 各层长度取中间值
+(defun dt:sz-jrt-strip-rec (strip excl-global / exc recs adj n row i j r skip
+                                  kept chains ch lens l total med ncirc e comp)
+  (setq exc nil)
+  (foreach e excl-global
+    (if (member e strip) (setq exc (cons e exc))))
+  ;; 模型: 剩余曲线逐条 (ename 端点表 长度 是否直线)
+  (setq recs nil)
+  (foreach e strip
+    (if (not (member e exc))
+      (setq recs (cons (list e
+                             (dt:sz-jrt-ends e)
+                             (dt:sz-jrt-curve-len e)
+                             (= (cdr (assoc 0 (entget e))) "LINE"))
+                       recs))))
+  (setq recs (reverse recs)
+        n (length recs))
+  ;; 邻接表: 谁跟谁头碰头
+  (setq adj nil
+        i 0)
+  (while (< i n)
+    (setq row nil
+          j 0)
+    (while (< j n)
+      (if (and (/= j i)
+               (dt:sz-jrt-adj-p (nth i recs) (nth j recs) 0.5))
+        (setq row (cons j row)))
+      (setq j (1+ j)))
+    (setq adj (cons (reverse row) adj)
+          i (1+ i)))
+  (setq adj (reverse adj))
+  ;; 几何复核剔除(生成规则反推)
+  (setq skip (dt:sz-jrt-close-pick recs adj n))
+  (foreach r skip
+    (setq exc (cons (nth 0 (nth r recs)) exc)))
+  ;; 计入测量的曲线 + 整圆计数
+  (setq kept nil
+        ncirc 0
+        i 0)
+  (foreach r recs
+    (if (not (member i skip))
+      (progn
+        (setq kept (cons (car r) kept))
+        (if (= (cdr (assoc 0 (entget (car r)))) "CIRCLE")
+          (setq ncirc (1+ ncirc)))))
+    (setq i (1+ i)))
+  (setq kept (reverse kept))
+  ;; 线链(下标分量 -> ename 分组)
+  (setq chains nil)
+  (foreach comp (dt:sz-jrt-comps-i n adj skip)
+    (setq ch nil)
+    (foreach i comp
+      (setq ch (cons (nth 0 (nth i recs)) ch)))
+    (setq chains (cons (reverse ch) chains)))
+  (setq chains (reverse chains)
+        lens (dt:sz-jrt-lens-at recs adj n skip)
+        total 0.0)
+  (foreach l lens
+    (setq total (+ total l)))
+  (setq med (dt:sz-jrt-median lens))
+  (list (length strip) (length chains) (length exc) total med ncirc
+        lens chains kept strip))
+
+;; 单条加热条完整性与结果输出; 通过返回 T, 取消/异常返回 nil
+(defun dt:sz-jrt-report (rec / nobjs nch nexcl total med ncirc lens chains kept
+                              nmiss minl clip)
+  (setq nobjs (nth 0 rec)
+        nch (nth 1 rec)
+        nexcl (nth 2 rec)
+        total (nth 3 rec)
+        med (nth 4 rec)
+        ncirc (nth 5 rec)
+        lens (nth 6 rec)
+        chains (nth 7 rec)
+        kept (nth 8 rec))
+  ;; 完整性(1): 仅 1 条线 —— 闭合单线按单层计, 开口单线视为不完整取消
+  (if (= nch 1)
+    (if (dt:sz-jrt-chain-closed-p (car chains))
+      (princ "\n【加热条长度】注意: 仅 1 条闭合线(单层), 按该线长度计。")
+      (progn
+        (alert "【提示】加热条不完整!\n\n仅识别到 1 条开口线, 无法计算加热条长度。\n(正常加热条为多条嵌套线)\n命令已取消。")
+        (princ "\n【加热条长度】仅识别到 1 条开口线, 命令已取消。")
+        (setq med nil))))
+  (if (<= nch 0)
+    (progn
+      (alert "【提示】加热条不完整!\n\n未能识别出有效嵌套线。\n命令已取消。")
+      (princ "\n【加热条长度】未能识别出有效嵌套线, 命令已取消。")
+      (setq med nil)))
+  ;; 完整性(2): 端点断口
+  (if med
+    (progn
+      (setq nmiss (dt:sz-jrt-nearmiss kept))
+      (if (> nmiss 0)
+        (progn
+          (alert (strcat "【提示】加热条疑似破损!\n\n检测到 " (itoa nmiss)
+                         " 处断口(线端点间距 0.01~2mm)。\n请检查图形完整性后重试。\n命令已取消。"))
+          (princ (strcat "\n【加热条长度】检测到 " (itoa nmiss)
+                         " 处疑似断口, 命令已取消。"))
+          (setq med nil)))))
+  (if med
+    (progn
+      ;; 提示(不取消): 明显短链 / 整圆 / 各层长度差异偏大
+      (setq minl (apply 'min lens))
+      (if (and (> nch 1) (< minl (* 0.5 med)))
+        (princ (strcat "\n【加热条长度】注意: 存在明显短链(最短 "
+                       (rtos minl 2 2) " mm), 已按中间值估计。")))
+      (if (> ncirc 0)
+        (princ (strcat "\n【加热条长度】注意: 含整圆 " (itoa ncirc)
+                       " 个, 已按轮廓线计入长度(若为通用一圆帽端帽, 请人工核对)。")))
+      (if (and (> nch 1) (> (- (apply 'max lens) minl) (* 0.2 med)))
+        (princ "\n【加热条长度】注意: 各层长度差异偏大, 结果请人工核对。"))
+      ;; 结果输出 + 剪贴板
+      (setq clip (dt:sz-fmt-num med))
+      (dt:sz-copy-clip clip)
+      (princ "\n------------------------------------------------------------")
+      (princ (strcat "\n【加热条长度】测量完成: 长度 = " (rtos med 2 2) " mm"
+                     " (" (itoa nch) " 层嵌套线各量一遍取中间值; 总长 "
+                     (rtos total 2 2) " mm; 剔除封闭线 " (itoa nexcl) " 根)"))
+      (if (and lens (<= (length lens) 8))
+        (progn
+          (princ "\n各层线长:")
+          (foreach l lens
+            (princ (strcat " " (rtos l 2 1))))))
+      (princ (strcat "\n" clip " 已复制到剪贴板, 可直接 Ctrl+V 粘贴。"))
+      (princ "\n------------------------------------------------------------")
+      (alert (strcat "【加热条长度测量结果】\n\n"
+                     "长度: " (rtos med 2 2) " mm\n"
+                     "(" (itoa nch) " 层嵌套线各量一遍, 取中间值)\n"
+                     "剔除封闭线: " (itoa nexcl) " 根\n\n"
+                     clip " 已复制到剪贴板。"))
+      T)))
 
 ;; ============================================================================
 ;; 三、外协加工通用引擎 (目标图纸管理、AABB 自动平铺防覆盖、字体降级与图纸克隆)
@@ -1546,6 +2108,105 @@
 (defun c:SZ ( ) (c:FLBSZ))
 (defun c:WXSZ ( ) (c:FLBSZ))
 
+;; 测量加热条长度主命令 (c:JRTSZ) —— 与测量分流板(FLBSZ)同级的只读测量:
+;; 自动识别 JRT 图层加热条, 长度 = 各层嵌套线取中间值; 多条加热条
+;; 列表点选、可连续测量; 检测不到/不完整 → 弹窗提示并取消(不降级手动选择)。
+;; 封闭线排除: 优先 JRTFBX 定位副本精确匹配; 几何复核(生成规则反推)兜底。
+(defun c:JRTSZ ( / *error* ss e objs fbx-ss fbx excl strips recs rec pick
+                   best best-d d q i k bb loop strip-gap)
+  (defun *error* (msg)
+    (if (and msg
+             (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
+      (princ (strcat "\n【加热条长度】错误: " msg)))
+    (princ))
+
+  (princ "\n【加热条长度】正在检测加热条(JRT)...")
+
+  ;; 步骤 1: 提取 JRT 图层曲线(检测不到 → 弹窗取消, 不转手动选择)
+  (setq objs nil)
+  (if (tblsearch "LAYER" "JRT")
+    (progn
+      (setq ss (ssget "X" '((8 . "JRT")
+                            (0 . "LINE,ARC,LWPOLYLINE,POLYLINE,SPLINE,CIRCLE,ELLIPSE"))))
+      (if ss
+        (foreach e (dt:ss->list ss)
+          (if (dt:sz-curve-p e) (setq objs (cons e objs)))))))
+  (if (null objs)
+    (progn
+      (alert "【提示】未检测到加热条!\n\n图层 \"JRT\" 不存在或图层上没有曲线。\n请先运行 JRT 生成加热条后再测量。\n命令已取消。")
+      (princ "\n【加热条长度】未检测到加热条(JRT 图层无曲线), 命令已取消。"))
+    (progn
+      ;; 步骤 2: JRTFBX 定位副本(有实体且匹配上 → 精确剔除封闭线本体;
+      ;;         剩余的由步骤 3 的几何复核兜底)
+      (setq fbx nil)
+      (if (tblsearch "LAYER" "JRTFBX")
+        (progn
+          (setq fbx-ss (ssget "X" '((8 . "JRTFBX") (0 . "LINE"))))
+          (if fbx-ss (setq fbx (dt:ss->list fbx-ss)))))
+      (setq excl (if fbx (dt:sz-jrt-fbx-match objs fbx) nil))
+      (if (and excl (> (length excl) 0))
+        (princ (strcat "\n【加热条长度】已按 JRTFBX 定位副本标记封闭线 "
+                       (itoa (length excl)) " 条。")))
+      ;; 步骤 3: 归堆 + 逐条测量
+      ;; (JRTFBX 精确剔除先行; 几何复核按生成规则反推, 每条都跑一遍兜底)
+      ;; 归堆间距可配: wx_runner.ini [测量加热条] strip_gap(默认 15;
+      ;; 误填 <1 按默认处理, 防把一根条的嵌套线拆散)
+      (setq strip-gap (atof (dt:sz-cfg-get "测量加热条" "strip_gap" "15.0")))
+      (if (< strip-gap 1.0) (setq strip-gap 15.0))
+      (setq strips (dt:sz-jrt-strips objs strip-gap)
+            recs nil)
+      (foreach rec strips
+        (setq recs (cons (dt:sz-jrt-strip-rec rec excl) recs)))
+      (setq recs (reverse recs))
+      ;; 步骤 4: 输出 —— 单条自动测; 多条列表点选、可连续测量
+      (cond
+        ((null recs)
+         (alert "【提示】未检测到加热条!\n\n未能从 JRT 图层识别出加热条。\n命令已取消。")
+         (princ "\n【加热条长度】未能识别出加热条, 命令已取消。"))
+        ((= 1 (length recs))
+         (princ (strcat "\n【加热条长度】检测到 1 条加热条("
+                        (itoa (nth 0 (car recs))) " 段曲线), 自动测量。"))
+         (dt:sz-jrt-report (car recs)))
+        (T
+         (princ (strcat "\n【加热条长度】检测到 " (itoa (length recs))
+                        " 条加热条:"))
+         (setq i 1)
+         (foreach rec recs
+           (setq bb (dt:rect-bbox (mapcar 'vlax-ename->vla-object
+                                          (nth 9 rec))))
+           (if bb
+             (princ (strcat "\n  第" (itoa i) "条: " (itoa (nth 0 rec))
+                            " 段曲线 / " (itoa (nth 1 rec)) " 条嵌套线, 中心("
+                            (rtos (* 0.5 (+ (car bb) (nth 2 bb))) 2 1) ", "
+                            (rtos (* 0.5 (+ (cadr bb) (nth 3 bb))) 2 1) ")"))
+             (princ (strcat "\n  第" (itoa i) "条: " (itoa (nth 0 rec))
+                            " 段曲线 / " (itoa (nth 1 rec)) " 条嵌套线")))
+           (setq i (1+ i)))
+         (setq loop T)
+         (while loop
+           (setq pick (getpoint "\n请点选要测量的加热条: "))
+           (if (null pick)
+             (setq loop nil)
+             (progn
+               ;; 就近匹配点选位置的那条加热条
+               (setq best nil
+                     best-d 1e99)
+               (foreach rec recs
+                 (foreach e (nth 9 rec)
+                   (setq q (vl-catch-all-apply 'vlax-curve-getclosestpointto
+                                               (list e pick)))
+                   (if (and (not (vl-catch-all-error-p q)) q)
+                     (setq d (distance pick q))
+                     (setq d 1e99))
+                   (if (< d best-d)
+                     (setq best-d d
+                           best rec))))
+               (if best (dt:sz-jrt-report best))
+               (initget "Y N")
+               (setq k (getkword "\n继续测量其他加热条? [是(Y)/否(N)] <N>: "))
+               (if (not (and k (= (strcase k) "Y"))) (setq loop nil)))))))
+      (princ))))
+
 ;; 线切割主命令 (c:XQG)
 (defun c:XQG ( / *error* ss cands closed-p)
   (defun *error* (msg)
@@ -1754,5 +2415,5 @@
 )
 
 (princ (strcat "\n外协测量工具已加载 " *dt-wx-ver*
-               ": FLBSZ=测量 / XQG=线切割 / JD=精雕 / SJTZ=数据图纸。"))
+               ": FLBSZ=测量分流板 / JRTSZ=加热条长度 / XQG=线切割 / JD=精雕 / SJTZ=数据图纸。"))
 (princ)

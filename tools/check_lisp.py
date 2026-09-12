@@ -161,12 +161,19 @@ DTSTART = ['c:DTINSTALL', 'c:DTRELOAD', 'c:DTUNINSTALL', 'c:DTDBG',
            'dt:st-add-support', 'dt:st-del-support',
            'dt:st-trusted-add', 'dt:st-trusted-del']
 # wx_runner 外协加工与尺寸测量脚本
-WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ',
+WX = ['c:FLBSZ', 'c:FLBSIZE', 'c:XQG', 'c:JD', 'c:SJTZ', 'c:JRTSZ',
       'dt:sz-copy-clip', 'dt:sz-curve-sample-pts',
       'dt:sz-curve-angle', 'dt:sz-uniq-angles', 'dt:sz-rot-pt',
       'dt:sz-check-closed', 'dt:sz-calc-box', 'dt:sz-fmt-num',
       'dt:sz-draw-box-dim', 'dt:sz-gets', 'dt:sz-ensure-style',
-      'dt:sz-export-to-dwg', 'dt:sz-doc-texts']
+      'dt:sz-export-to-dwg', 'dt:sz-doc-texts',
+      'dt:sz-jrt-curve-len', 'dt:sz-jrt-ends',
+      'dt:sz-jrt-adj-p', 'dt:sz-jrt-comps-i', 'dt:sz-jrt-lens-at',
+      'dt:sz-jrt-spread', 'dt:sz-jrt-joined-p', 'dt:sz-jrt-close-pick',
+      'dt:sz-jrt-min-dist', 'dt:sz-jrt-obj-bbox', 'dt:sz-jrt-bb-gap',
+      'dt:sz-jrt-strips', 'dt:sz-jrt-fbx-match', 'dt:sz-jrt-nearmiss',
+      'dt:sz-jrt-chain-closed-p', 'dt:sz-jrt-median',
+      'dt:sz-jrt-strip-rec', 'dt:sz-jrt-report']
 # demo_recorder 演示记录器(独立小工具: 命令反应器日志, 无几何库/无对话框)
 DEMO = ['c:DEMOREC', 'c:DEMOSTOP', 'c:DEMOMARK',
         'demo:gets', 'demo:canon', 'demo:skip-p', 'demo:writeline', 'demo:pt-s',

@@ -1,5 +1,5 @@
 ﻿;;; ============================================================================
-;;; dt_start.lsp  v3.3 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.4 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -38,6 +38,8 @@
 ;;;   关闭 CAD 重开, 不再让错误潜伏到运行期。
 ;;; v3.3  : 加载横幅并为一行并引用 dt:st-version(版本单一来源, 根治横幅
 ;;;   版本号与头注脱节); 升级安装提示从加载横幅移至 DTINSTALL 完成输出。
+;;; v3.4  : 外协加工子菜单新增「测量加热条长度(JRTSZ)」(wx v2.15 配套,
+;;;   与测量分流板同级); dt:st-about 命令清单同步。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -93,7 +95,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.3")     ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.4")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -495,7 +497,7 @@
   (foreach fam dt:st-families
     (if (cadddr fam)
       (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 画图 / " (cadddr fam) " 参数"))
-      (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 测量分流板(长宽/下料/标注)"))))
+      (setq s (strcat s "\n  " (cadr fam) ": " (caddr fam) " 测量分流板 / JRTSZ 测量加热条长度 / XQG·JD·SJTZ 外协出图"))))
   (setq s (strcat s "\n  工具: DTRELOAD 刷新 / DTINSTALL 安装 / DTUNINSTALL 卸载 / DTDBG 诊断 / DTDEMO 演示记录"))
   (alert s)
   (princ))
@@ -580,11 +582,12 @@
                (vla-addmenuitem sub 0 (strcat "画" zh "(&D)") (dt:st-macro (strcat "(c:" mc ")")))
                (vla-addmenuitem sub 1 (strcat zh "参数(&P)") (dt:st-macro (strcat "(c:" pc ")"))))
              (progn
-               ;; 外协加工三级项: 测量分流板 / 线切割 / 精雕 / 数据图纸
+               ;; 外协加工三级项: 测量分流板 / 测量加热条长度 / 线切割 / 精雕 / 数据图纸
                (vla-addmenuitem sub 0 "测量分流板(&F)" (dt:st-macro (strcat "(c:" mc ")")))
-               (vla-addmenuitem sub 1 "线切割(&W)" (dt:st-macro "(c:XQG)"))
-               (vla-addmenuitem sub 2 "精雕(&J)" (dt:st-macro "(c:JD)"))
-               (vla-addmenuitem sub 3 "数据图纸(&D)" (dt:st-macro "(c:SJTZ)"))))
+               (vla-addmenuitem sub 1 "测量加热条长度(&C)" (dt:st-macro "(c:JRTSZ)"))
+               (vla-addmenuitem sub 2 "线切割(&W)" (dt:st-macro "(c:XQG)"))
+               (vla-addmenuitem sub 3 "精雕(&J)" (dt:st-macro "(c:JD)"))
+               (vla-addmenuitem sub 4 "数据图纸(&D)" (dt:st-macro "(c:SJTZ)"))))
            (setq idx (1+ idx)))
          ;; 工具子菜单
          (vla-addseparator popMain idx)
