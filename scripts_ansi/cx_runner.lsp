@@ -1,5 +1,10 @@
 ;;; ============================================================================
-;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.8
+;;; 程序名 : 出线槽绘制工具 (cx_runner.lsp)  v11.9
+;;; v11.9  : 体检修复: dt:cx-process 源线收集补 dt:curves-only 过滤 —— CX 层
+;;;          混入文字/标注/块时, vlax-curve-* 系列(dt:cx-trim/fillet-all/
+;;;          join/close/yxb-plan)会抛"参数类型错误"中断流程, 留下半成品
+;;;          (flb/jrt 同场景早有防护, 唯 cx 漏网)。偏移环节 dt:offset-enames
+;;;          自带类型跳过, 不受影响。
 ;;; v11.8  : 全图层配色重排(用户需求, 与 flb v10.11 同批): CXK 150→122
 ;;;          (青绿), YXB 4→84(深绿, 与 LS 青 4 区分); 两处内联建层对已
 ;;;          存在图层也把颜色校正为登记值(老图重跑自动换新色)。几何零变化。
@@ -132,7 +137,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-cx-ver* "v11.8")
+(setq *dt-cx-ver* "v11.9")
 
 ;; ============================================================================
 ;; 出线槽参数 —— 由 dt:cx-param-table 驱动(默认值/预填/应用/恢复默认),
@@ -1396,8 +1401,11 @@
       ;;    (裁剪/圆角方向验证用); 只对源线偏移生成通道壁(源线保留在
       ;;    "CX"图层, 不移走不删除; v8.14 用 dt:offset-enames 避免
       ;;    重跑时把旧通道壁再偏移一遍)
+      ;;    v11.9: center-lines 补 dt:curves-only —— CX 层混入文字/标注/块
+      ;;    时 vlax-curve-* 会抛"参数类型错误"中断流程(v10.3 规约: 收集前
+      ;;    一律先过本判定); eName 列表不滤, 偏移/排除环节各自有防护。
       (setq src-enames (dt:ss->list ss)
-            center-lines (mapcar 'vlax-ename->vla-object src-enames))
+            center-lines (dt:curves-only (mapcar 'vlax-ename->vla-object src-enames)))
       (setq res (dt:offset-enames src-enames slot-layer slot-dist))
       (if (> (car res) 0)
         (progn

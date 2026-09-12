@@ -43,6 +43,11 @@
 ;;; v3.5  : 外协加工子菜单项重新排定顺序(用户指定, 自上而下):
 ;;;   测量加热条长度 → 测量分流板 → 数据图纸 → 线切割 → 精雕。
 ;;;   仅调索引位次, 标签/热键/宏三者绑定关系与其余子菜单零变化。
+;;; v3.6  : 体检修复: c:DTDEMO 移除入口守卫 (null demo:gets) —— defun 只设
+;;;   函数槽不设值槽, 把函数名当变量求值恒为 nil, 该守卫恒真且使后面的
+;;;   (T (c:DEMOREC)) 成死代码(坑 #72, jrt v9.20 同款清除)。行为零变化:
+;;;   本来就每次都走"定位→加载→开录"链路(load 幂等), 只是把恒真条件与
+;;;   死分支清掉。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -98,7 +103,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.5")     ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.6")     ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -689,9 +694,11 @@
 ;; 演示记录器(v3.1): 按需加载 scripts\demo_recorder.lsp 并 开/关 录制。
 ;; 不进家族表不随启动加载(反应器工具常驻无必要); 文件缺失时明确提示。
 (defun c:DTDEMO ( / dir f)
+  ;; v3.6: 不再判 (null demo:gets) —— defun 只设函数槽不设值槽, 函数名当
+  ;;   变量求值恒为 nil(坑 #72), 该守卫恒真; 一律走"定位→加载→开录"。
   (cond
     (*demo-on* (c:DEMOSTOP))
-    ((null demo:gets)
+    (T
      (setq dir (dt:st-locate))
      (cond
        ((null dir)
@@ -700,8 +707,7 @@
         (princ "\n【演示】脚本目录里没有 demo_recorder.lsp。"))
        ((vl-catch-all-error-p (vl-catch-all-apply 'load (list (strcat dir "\\" f))))
         (princ "\n【演示】demo_recorder.lsp 加载失败, 报错见命令行。"))
-       (T (c:DEMOREC))))
-    (T (c:DEMOREC)))
+       (T (c:DEMOREC)))))
   (princ))
 
 ;; 诊断命令(v2.0): 打印目录/选版信息 + 逐步执行 offset 参数对话框链路,

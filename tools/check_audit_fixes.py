@@ -348,6 +348,74 @@ def banners():
 check('BANNER', '加载横幅版本号单一来源(不再硬编码)', banners)
 
 
+# ---------------------------------------------------------------------------
+# 2026-09-12 全面审查修复回归(四项):
+#   R1 cx 源线收集未过滤曲线类型: CX 层混入文字/标注时 vlax-curve-* 抛
+#      "参数类型错误"中断流程(flb/jrt 早有 dt:curves-only 防护, 唯 cx 漏网)。
+#      断言: dt:cx-process 的 center-lines 必须经 dt:curves-only 过滤。
+#   R2 dt_start c:DTDEMO 入口守卫 (null demo:gets) 恒真(坑 #72: defun 只设
+#      函数槽不设值槽)。断言: 该守卫不得再现。
+#   R3 wx 剪贴板回退路径把内容拼进 cmd 命令行(注入面)。断言: dt:sz-copy-clip
+#      内不得再有 startapp 拼接 str, 必须走临时文件 + clip < 文件。
+#   R4 wx WBLOCK 回退临时文件名固定(_dt_wx_tmp.dwg 直接拼接), 双开 CAD
+#      并发互删。断言: 必须用 vl-filename-mktemp 生成; 排版 ini 数值解析
+#      不得再用 atof 直读(垃圾串静默变 0, 坑 #54), 须走 dt:sz-num-or。
+# ---------------------------------------------------------------------------
+def r1_cx_curves_only():
+    src = code_of('cx_runner.lsp')
+    if "center-lines (dt:curves-only (mapcar 'vlax-ename->vla-object src-enames))" not in src:
+        return False, 'cx dt:cx-process 源线未过 dt:curves-only 过滤'
+    return True, 'cx 源线收集已过滤曲线类型'
+
+
+check('R1', 'cx 源线收集 dt:curves-only 过滤', r1_cx_curves_only)
+
+
+def r2_dtdemo_guard():
+    src = code_of('dt_start.lsp')
+    if '(null demo:gets)' in src:
+        return False, 'c:DTDEMO 仍有 (null demo:gets) 恒真守卫(坑 #72)'
+    return True, '恒真守卫已移除, DTDEMO 一律走加载链路'
+
+
+check('R2', 'dt_start DTDEMO 坑#72 恒真守卫清除', r2_dtdemo_guard)
+
+
+def r3_clip_injection():
+    src = code_of('wx_runner.lsp')
+    m = re.search(r'defun dt:sz-copy-clip.*?(?=\n\(defun )', src, re.S)
+    if not m:
+        return False, '找不到 dt:sz-copy-clip'
+    body = m.group(0)
+    if 'set /p=' in body.replace('\\\\', '\\'):
+        return False, 'clip 回退仍把内容拼进 cmd 命令行'
+    if 'vl-filename-mktemp' not in body or 'clip <' not in body:
+        return False, 'clip 回退未走临时文件路径'
+    return True, '剪贴板回退已改临时文件, 无命令拼接'
+
+
+check('R3', 'wx 剪贴板回退去命令拼接', r3_clip_injection)
+
+
+def r4_wx_temp_and_num():
+    src = code_of('wx_runner.lsp')
+    problems = []
+    if 'vl-filename-mktemp' not in src:
+        problems.append('WBLOCK 临时名未用 vl-filename-mktemp')
+    if re.search(r'strcat\s+tmp-dir\s+"\\\\_dt_wx_tmp\.dwg"', src):
+        problems.append('WBLOCK 仍在拼接固定临时名 _dt_wx_tmp.dwg')
+    if '(atof (dt:sz-cfg-get' in src:
+        problems.append('ini 数值仍用 atof 直读(垃圾串静默变 0)')
+    if 'defun dt:sz-num-or' not in src:
+        problems.append('缺 dt:sz-num-or(distof 校验)helper')
+    if problems:
+        return False, '; '.join(problems)
+    return True, '临时名唯一化 + ini 数值 distof 校验均到位'
+
+
+check('R4', 'wx 临时文件唯一化 + ini 数值防呆', r4_wx_temp_and_num)
+
+
 def main():
     n_ok = sum(1 for _, ok in RESULTS if ok)
     fails = [cid for cid, ok in RESULTS if not ok]

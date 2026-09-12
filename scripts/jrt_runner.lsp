@@ -2049,7 +2049,8 @@
                           dd (- (* (nth 0 n) (nth 1 d)) (* (nth 1 n) (nth 0 d))))
                     (if (< (abs (- (abs dd) halfw)) 0.5)
                       (setq found T))))))))))
-  found))
+  found)
+)
 
 ;; 曲线与直线实体的交点列表(取该曲线一侧; 无交点 nil)
 ;; v9.17: dt:cross-points 每对为 (obj . pts) —— 交点列表用 cdr 取(此前误用

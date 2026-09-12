@@ -26,7 +26,20 @@
 ;;;      - 图形最右侧 +30 位置自动生成规范化双列信息文本块(客户/模具/中心距/分流板/热咀/出线/日期)
 ;;;      - 日期全自动读取系统时间生成，各字段支持记忆与 CAD 双击编辑
 ;;;
-;;; 版本: v2.17
+;;; 版本: v2.18
+;;; v2.18 : 体检修复五项(几何零变化):
+;;;         ①dt:sz-export-to-dwg 加局部 *error* 兜底: 中途抛错关闭悬挂的
+;;;           UNDO 组并清理临时克隆(沿用 c:FLBSZ 的 undo-started 惯用法),
+;;;           不再残留 front/back/txt 临时实体;
+;;;         ②dt:sz-copy-clip 回退路径改"写临时文件 + clip < 文件": 不再把
+;;;           内容拼进 cmd 命令行, 消除元字符命令注入面;
+;;;         ③WBLOCK 回退临时名改 vl-filename-mktemp 唯一生成: 固定名
+;;;           _dt_wx_tmp.dwg 双开 CAD 并发导出时互删对方中间文件;
+;;;         ④dt:sz-cfg-get 定位顺序改确定性优先: 先取 *dt-script-dir* 旁
+;;;           的 wx_runner.ini, 才 findfile 全局 —— 多副本环境不再命中
+;;;           支持路径里其它目录的同名旧副本(flb dcl 同款坑);
+;;;         ⑤排版四项 ini 值 atof 换 dt:sz-num-or(distof 校验): 垃圾串
+;;;           不再静默变 0.0 画出贴死排版(坑 #54 口径)。
 ;;; v2.17 : 归堆间距可配(用户需求): wx_runner.ini 新 [测量加热条] 节
 ;;;         strip_gap(默认 15.0) —— 全部 JRT 曲线按"最小间距 <= strip_gap"
 ;;;         归成一根根加热条; 误填 <1 按默认 15 处理(防把一根条的嵌套线
@@ -161,7 +174,7 @@
 (vl-load-com)
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-wx-ver* "v2.17")
+(setq *dt-wx-ver* "v2.18")
 
 ;; 会话级全局记忆
 (setq *dt-xqg-target-dwg* nil)       ;; 线切割目标图纸路径记忆
@@ -285,7 +298,9 @@
 ;; ============================================================================
 
 ;; Windows 剪贴板写入: 优先 ActiveX htmlfile, 失败回退原生 clip.exe
-(defun dt:sz-copy-clip (str / html r)
+;; v2.18: 回退路径不再把 str 拼进 cmd 命令行 —— 改写临时文件后 clip < 文件,
+;;   内容里的 " & | ^ 等元字符不再有命令注入面(现在只传数字串, 防患未然)。
+(defun dt:sz-copy-clip (str / html r tmp f)
   (setq r (vl-catch-all-apply
             '(lambda ( / html)
                (setq html (vlax-create-object "htmlfile"))
@@ -301,7 +316,14 @@
   (if (or (vl-catch-all-error-p r) (null r))
     (vl-catch-all-apply
       '(lambda ( )
-         (startapp (strcat "cmd.exe /c <nul set /p=\"" str "\" | clip")))
+         (setq tmp (vl-filename-mktemp "_dt_clip_.txt"))
+         (if tmp
+           (progn
+             (setq f (open tmp "w"))
+             (write-line str f)
+             (close f)
+             (startapp (strcat "cmd.exe /c clip <\"" tmp "\""))
+             (vl-catch-all-apply 'vl-file-delete (list tmp)))))
       nil))
   T)
 
@@ -1257,14 +1279,23 @@
         (setq i (1+ i))))))
 
 ;; 从 wx_runner.ini (或 size_runner.ini 兼容) 读取配置节数值
+;; v2.18: 定位顺序改为确定性优先 —— 先取 dt_start 注入的脚本目录(*dt-script-dir*)
+;;   下的同名 ini, 找不到才 findfile 全局搜索。多副本环境下 findfile 会命中
+;;   支持路径里其它目录的同名旧副本(flb v2.0 dcl 定位错乱的同一坑), 脚本
+;;   目录旁的配置才是"这一份"脚本的配置。
 (defun dt:sz-cfg-get (section key def-val / path res sec f ln p k vs)
-  (setq path (findfile "wx_runner.ini"))
-  (if (null path) (setq path (findfile "size_runner.ini")))
-  (if (null path)
-    (setq path (strcat (if (and (boundp '*dt-script-dir*) *dt-script-dir*)
-                         *dt-script-dir*
-                         "C:\\CAD")
-                       "\\wx_runner.ini")))
+  (if (and (boundp '*dt-script-dir*) *dt-script-dir*
+           (setq path (findfile (strcat *dt-script-dir* "\\wx_runner.ini"))))
+    path
+    (progn
+      (setq path (findfile "wx_runner.ini"))
+      (if (null path) (setq path (findfile "size_runner.ini")))
+      (if (null path)
+        (setq path (strcat (if (and (boundp '*dt-script-dir*) *dt-script-dir*)
+                             *dt-script-dir*
+                             "C:\\CAD")
+                           "\\wx_runner.ini")))
+      path))
   (setq res nil sec nil)
   (if (and path (findfile path))
     (vl-catch-all-apply
@@ -1291,6 +1322,13 @@
              (setq f nil))))))
   (if f (progn (vl-catch-all-apply 'close (list f)) (setq f nil)))
   (if (or (null res) (= res "")) def-val res))
+
+;; v2.18: ini 值 -> 数值(distof 校验), 空/垃圾串回退默认 def —— atof 对
+;;   垃圾串静默返回 0.0, 会把间距类参数悄悄改成 0 画出退化排版(坑 #54 口径,
+;;   与 flb dt:get-num 同规)。0 是合法值, 靠"distof 非 nil"区分。
+(defun dt:sz-num-or (s def / v)
+  (setq v (if (and (= (type s) 'STR) (/= s "")) (distof s) nil))
+  (if v v def))
 
 ;; 扫描磁盘，寻找当天存在的最高序号图纸文件 (如 09.04.dwg, 09.04_1.dwg, 09.04_2.dwg...)
 ;; 若 09.04_2.dwg 被删除，则自动返回 09.04_1.dwg；若都无，返回 nil
@@ -1647,7 +1685,7 @@
 ;; 将所选曲线排版并输出到目标 DWG (当前文档原生处理 + 原子级传输 + 防覆盖平铺 + 文字标注)
 ;; is-auto: T=自动提取图层, nil=手动框选(手动模式 100% 全保留)
 (defun dt:sz-export-to-dwg (cands title target-layer is-auto /
-                            cur-doc acad docs target-path tgt-doc
+                            *error* undo-marked cur-doc acad docs target-path tgt-doc
                             ms-tgt existing-bb rot-ang
                             front-objs back-objs export-objs o c
                             src-bb s-minx s-miny s-maxx s-maxy part-w part-h
@@ -1659,6 +1697,22 @@
                             grid-n grid-col txt-list txt-infos txt-min-y ip-t ti migrated
                             unit-w ax unit-bb ub-w ub-h row-ctop
                             first-p x0 by0 bx1 by1 bx2 by2 dx dy box-obj)
+  ;; v2.18: 局部 *error* 兜底 —— 中途抛错时关闭悬挂的 UNDO 组并清理
+  ;;   当前图里的临时克隆(沿用 c:FLBSZ 的 undo-started 收口惯用法), 避免
+  ;;   出错后 UNDO 组悬挂、front/back/txt 临时实体残留图面。
+  (defun *error* (msg)
+    (if undo-marked
+      (vl-catch-all-apply 'vla-endundomark (list cur-doc)))
+    (foreach o (append (if export-objs export-objs nil)
+                       (if front-objs front-objs nil)
+                       (if back-objs back-objs nil)
+                       (if txt-obj (list txt-obj) nil)
+                       (if box-obj (list box-obj) nil))
+      (vl-catch-all-apply 'vla-delete (list o)))
+    (if (and msg
+             (not (wcmatch (strcase msg t) "*cancel*,*exit*,*abort*,*取消*")))
+      (princ (strcat "\n【" title "】导出错误: " msg)))
+    (princ))
   (setq cur-doc (vla-get-activedocument (vlax-get-acad-object))
         acad    (vlax-get-acad-object)
         docs    (vla-get-documents acad)
@@ -1669,10 +1723,12 @@
         ;;   text_gap   文字底边距"图形最小包络盒"顶边的距离
         ;;   box_margin 单元包络盒相对内容的外扩内边距(精雕会画出该盒;
         ;;              线切割只用它作排版基准, 不画盒)
-        box-gap (atof (dt:sz-cfg-get "排版" "box_gap" "100.0"))
+        ;;   v2.18: atof 换 dt:sz-num-or(distof 校验) —— ini 误填垃圾串时
+        ;;   atof 静默回 0.0(box_gap=0 会排出贴死的退化排版, 坑 #54 同款)
+        box-gap (dt:sz-num-or (dt:sz-cfg-get "排版" "box_gap" "100.0") 100.0)
         per-row (max 1 (atoi (dt:sz-cfg-get "排版" "per_row" "4")))
-        text-gap (atof (dt:sz-cfg-get "排版" "text_gap" "50.0"))
-        box-margin (atof (dt:sz-cfg-get "排版" "box_margin" "20.0")))
+        text-gap (dt:sz-num-or (dt:sz-cfg-get "排版" "text_gap" "50.0") 50.0)
+        box-margin (dt:sz-num-or (dt:sz-cfg-get "排版" "box_margin" "20.0") 20.0))
 
   ;; 0) 预先探测源图形的整体倾斜角 (用于后续正交旋转摆正)
   (setq rot-ang (dt:sz-detect-tilt-angle cands))
@@ -1743,6 +1799,7 @@
 
           ;; 4) 在当前活动图纸 (cur-doc) 中原生构建正面工件与反面镜像 (开启 Undo 保护)
           (vla-startundomark cur-doc)
+          (setq undo-marked T)   ; v2.18: *error* 兜底标记(各收口点清零)
 
           ;; 4a. 克隆 cands 生成正面临时图元 front-objs
           (setq front-objs nil)
@@ -1755,6 +1812,7 @@
           (if (null front-objs)
             (progn
               (vla-endundomark cur-doc)
+              (setq undo-marked nil)
               (princ "\n【错误】克隆源图元失败。")
               nil)
             (progn
@@ -1773,6 +1831,7 @@
                 (progn
                   (foreach o front-objs (vl-catch-all-apply 'vla-delete (list o)))
                   (vla-endundomark cur-doc)
+                  (setq undo-marked nil)
                   (princ "\n【错误】计算正面工件包络盒失败。")
                   nil)
                 (progn
@@ -1905,10 +1964,15 @@
                   (setq r (vl-catch-all-apply 'vla-copyobjects (list cur-doc sa ms-tgt)))
                   (if (vl-catch-all-error-p r)
                     (progn
-                      ;; 回退 WBLOCK
-                      (setq tmp-dir (getenv "TEMP"))
-                      (if (null tmp-dir) (setq tmp-dir "C:\\TEMP"))
-                      (setq tmp-dwg (strcat tmp-dir "\\_dt_wx_tmp.dwg"))
+                      ;; 回退 WBLOCK (v2.18: 临时名用 vl-filename-mktemp 唯一
+                      ;; 生成 —— 固定名 _dt_wx_tmp.dwg 在双开 CAD 同时导出时
+                      ;; 会互删对方的中间文件)
+                      (setq tmp-dwg (vl-catch-all-apply
+                                      'vl-filename-mktemp
+                                      (list "_dt_wx_" (getenv "TEMP") ".dwg")))
+                      (if (or (vl-catch-all-error-p tmp-dwg) (null tmp-dwg))
+                        (setq tmp-dwg (strcat (if (getenv "TEMP") (getenv "TEMP") "C:\\TEMP")
+                                              "\\_dt_wx_tmp.dwg")))
                       (vl-catch-all-apply 'vl-file-delete (list tmp-dwg))
                       (setq w-res (vl-catch-all-apply 'vla-wblock (list cur-doc tmp-dwg sa)))
                       (if (and (not (vl-catch-all-error-p w-res)) (findfile tmp-dwg))
@@ -1926,6 +1990,7 @@
                   (foreach o export-objs
                     (vl-catch-all-apply 'vla-delete (list o)))
                   (vla-endundomark cur-doc)
+                  (setq undo-marked nil)
                   ;; 6.5) v2.8 精雕: 目标图中原 FLB 系图层实体并入 JD 层并删原层
                   (if (equal title "精雕")
                     (progn
@@ -2151,7 +2216,7 @@
       ;; (JRTFBX 精确剔除先行; 几何复核按生成规则反推, 每条都跑一遍兜底)
       ;; 归堆间距可配: wx_runner.ini [测量加热条] strip_gap(默认 15;
       ;; 误填 <1 按默认处理, 防把一根条的嵌套线拆散)
-      (setq strip-gap (atof (dt:sz-cfg-get "测量加热条" "strip_gap" "15.0")))
+      (setq strip-gap (dt:sz-num-or (dt:sz-cfg-get "测量加热条" "strip_gap" "15.0") 15.0))
       (if (< strip-gap 1.0) (setq strip-gap 15.0))
       (setq strips (dt:sz-jrt-strips objs strip-gap)
             recs nil)
