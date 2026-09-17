@@ -8,7 +8,7 @@
 - **技术栈**：AutoLISP + Visual LISP (COM) + DCL，纯 `vla-*` / `vlax-*` 几何操作，不调用 CAD 命令（撤销用 COM 撤销标记）
 - **开发工具**：Python 3 纯标准库，零第三方依赖
 
-当前版本：`flb_runner` **v10.11** / `jrt_runner` **v9.36** / `cx_runner` **v11.8** / `wx_runner` **v2.17** / `dt_start` **v3.4** / `demo_recorder` **v1.1**
+当前版本：`flb_runner` **v10.11** / `jrt_runner` **v9.36** / `cx_runner` **v11.9** / `wx_runner` **v2.18** / `dt_start` **v3.6** / `demo_recorder` **v1.1**
 
 ---
 
@@ -53,7 +53,10 @@
 2. 命令行输入 `DTINSTALL`；
 3. 完成。之后每次开 CAD 会自动加载全部脚本并挂出顶栏菜单「热流道自动化(&R)」。
 
-> **AutoCAD 2007 ~ 2020 的老电脑**：先把 `scripts_ansi\` 里的 6 个 `.lsp` 复制到 `scripts\` **覆盖同名文件**，再执行上面的安装步骤（ini / dcl / 记忆文件两种版本通用，且会自动生成）。
+> **AutoCAD 2007 ~ 2020 的老电脑**：不要手工拷脚本 —— 在开发机**双击仓库根目录的 `一键生成移植包.bat`**，
+> 它会生成 `deploy\HYT-CAD-老机版\`（6 个 GBK 脚本 + `install.bat` + `使用说明.txt`，并附 zip）。
+> 把该目录（或 zip）拷到老电脑，**双击里面的 `install.bat`** 即完成装机（自动拷贝 → 校验字节数 → 调用 AutoCAD 跑 APPLOAD + DTINSTALL）；
+> 只想放文件不碰 CAD 就执行 `install.bat <目标目录> --check`（ini / dcl / 记忆文件两种版本通用，且会自动生成）。
 
 ### 4.2 日常使用
 
@@ -87,7 +90,9 @@ HYT-CAD/
 │  └─ *.ini / *.dcl / *_mem.ini   运行生成物（不入库，首次运行自动生成）
 ├─ scripts_ansi/            GBK 副本目录（AutoCAD 2007~2020），由 make_ansi.py 生成
 ├─ tools/                   开发与门禁工具（Python 3 纯标准库）
-└─ *.md                     文档：README / README_CAD / AGENTS / AGENTS_CAD / AUDIT-SPEC / BOOTSTRAP
+├─ deploy/                  **构建产物**：一键移植包（老机部署用，不入库、可再生）
+├─ 一键生成移植包.bat        双击 = 生成老机移植包（make_ansi + 门禁 + 打包 + 打开目录）
+└─ *.md                     文档：README / README_CAD / AGENTS / AGENTS_CAD / CHANGELOG（另 .agents\ 下 AUDIT-SPEC / BOOTSTRAP）
 ```
 
 ## 6. 文档索引
@@ -96,9 +101,10 @@ HYT-CAD/
 |---|---|---|
 | `README.md` | 浏览仓库的人 | 项目用途、功能概览、快速开始（本文） |
 | [`README_CAD.md`](README_CAD.md) | CAD 使用者 | 操作手册：安装、分步画图流程、命令手册、图层对照、参数详解、注意事项与排错 |
-| [`AGENTS_CAD.md`](AGENTS_CAD.md) | 接手代码的 AI / 开发者 | 技术细节：函数清单、算法要点、数据结构、版本历史、已知坑、接手流程 |
+| [`AGENTS_CAD.md`](AGENTS_CAD.md) | 接手代码的 AI / 开发者 | 技术细节：文件清单、加载与版本兼容、图层约定、完整流程、参数表、函数清单、算法要点、数据结构、已知坑、接手流程 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 查历史的开发者 | 逐版变更 + 跨脚本修复批次（「批次N」）的决策与根因记录，v9.0 起 |
 | [`AGENTS.md`](AGENTS.md) | AI 编码助手 | 协作契约：铁律、验证门禁命令、红线与指令映射 |
-| `AUDIT-SPEC.md` / `BOOTSTRAP.md` | 维护者 | 代码体检规范 / 规范部署与升级流程 |
+| `.agents\AUDIT-SPEC.md` / `.agents\BOOTSTRAP.md` | 维护者 | 代码体检规范 / 规范部署与升级流程 |
 
 ## 7. 开发者：门禁命令
 

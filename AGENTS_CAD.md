@@ -10,25 +10,25 @@
 
 ## 1. 项目概览
 
-| 项        | 内容                                                                                                                                                                                                                                                                                                                                                     |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 工作目录     | `C:\Users\5600\Documents\ZDH\HYT-CAD\`（仓库根目录，Git 远程 `xlzxld/HYT-CAD`；2026-08-30 发版并分类：**`scripts\` = 6 .lsp 入库 + ini/dcl 运行生成物(脚本启动/弹框时自动再生, 2026-09-09 起移出仓库不入 git)合成一个运行单位**；`scripts_ansi\` = 6 个老版本 GBK 编码脚本副本(供 2007~2020 老电脑使用, 坑 #64)；`tools\` = check_lisp/\_audit/\_collide/make_ansi/check_sysvars/check_defun_depth/check_audit_fixes/test_direction/check_jrt2_out/check_layer_colors/\_aci_colors；根目录 = 六份 md(AGENTS/AGENTS_CAD/AUDIT-SPEC/BOOTSTRAP/README/README_CAD，其中 README 为仓库首页总览、README_CAD 为操作手册)。自启钩子指向 scripts\dt_start.lsp） |
-| 改前备份     | 无固定目录（原 test\pc\ 已随发版删除）——改动前自行 `cp` 原件到临时位置, 用完即删, **勿在 CAD\ 内留第二份 .lsp**（坑 #35/#49 多副本误载）                                                                                                                                                                                                                                                            |
-| 主脚本(分流板) | `flb_runner.lsp`（**v10.11**，2659 行，101 defun，多模板 通用/矩形，命令 FLB/FLBPARAM，保留 c:OFF 兼容别名；假体默认传统逐步, 参数框勾选「包络法」切换；参数「主进胶R (zjj_r 14.35)」与图层 ZJJ，自动扫描 DP 圆心生成主进胶圆；v10.11 预建清单扩为 15 层(新增 JRTFBX)+全图层配色重排+ensure-layer 已存在也校正登记色) |
-| 出线槽脚本    | `cx_runner.lsp`（**v11.8**，1940 行，81 defun，命令 CX/CXPARAM，保留 c:SLOT 兼容别名；断口圆角函数 `dt:slot-fillet-pair`，CXK 图层青绿 122；**生成出线槽时自动布置压线板**(YXB 图层深绿 84, 模板=v11.2 新 D 形 6 件(重合线16.6/上下边11/右边15.3/R4.3弧×2, 出自更新后 tools\1.dxf), 重合线中点(白线交界)=定位点, 沿选定壁 gap 均匀分布整组居中+斜壁旋转, **壁候选=直线+多段线直段(v11.3), 弧段跳过+失败自诊断计数**, plan/place 两步——删源线前规划/删源线后放置, 无碰撞判断, entnext 全库扫描死循环已根治; **v11.7 左壁畸形根治**(镜像系弧角区间反向) + **运行时可选 内壁(I)/外壁(O) 整圈一致取侧**(相连源线中点投票, 左/右壁语义保留))；全文件零 (command) 主流程(COM标记撤销, 坑 #69 根除)） |
-| 加热条脚本    | `jrt_runner.lsp`（**v9.36**，3121 行，119 defun，多模板 通用一/通用二，命令 JRT/JRTPARAM；**封闭线定位层 JRTFBX(浅橙 21)**——v9.36 定案: 通用二破口封闭线**本体在 JRT**(加热条结构完整, 与 v9.33 一致), "JRTFBX" 仅为其同几何定位副本(dt:jrt2-trace, 供另一项目建模脚本按层定位; 不在外协白名单, 不进数据图纸/精雕出图, 重跑随产物自清)；通用二支持**单线自动补边**——外壁整圈 + JRTDW 定位线(长线一头埋板内亦可, 两端按轮廓围合区域分里外; 通道线裁板内侧留板边侧+外端延长保留), 出线口自动开出, **圆弧/圆外壁通道线双端自动延伸(参数 jrt2_hook_ext 默认5, 0=旧行为)**；**方向几何判定(v9.25/26/27)**: 嵌套内偏=整环传播 A/B 两候选环取离 FLB 壁更远者朝内(围合奇偶→JRTDW 逐级回退)/颈线=FLB 围合区 24 段采样奇偶判外(L 形非凸也对, 包围盒中心兜底)；vlax-curve nil 返回全双判(numberp: nil 崩溃已根治)；坑 #73 已根治(undo-mark 缺括号吞函数, hook-one 等回顶层)；全文件零 (command) 调用, 坑 #69 根除) |
-| 尺寸测量与外协 | `wx_runner.lsp`（**v2.17**，2419 行，73 defun，独立第 4 脚本，命令 FLBSZ/JRTSZ/XQG/JD/SJTZ；**测量加热条长度(v2.17, JRTSZ)**——JRT 曲线按归堆间距聚条(可配 [测量加热条] strip_gap 默认15)/长度=各层嵌套线取中间值/封闭线排除双通道(JRTFBX 副本精确匹配优先 + 几何复核=生成规则反推: 两头都接线的短直线试剔, 剔后线链"几乎等长"才确认, 圆弧一律不动)/多条点选连测/无加热条·仅1条开口线·端点断口0.01~2mm 即弹窗取消不降级手动选；工件倾斜自动正交摆正；**精雕镜像在本体右侧(竖直轴,间隔75mm)，每幅(本体+镜像+文字)绿色包络盒框住(实体级颜色,盒=内容精确bbox)；精雕/线切割 网格排版(v2.13 根治间距): 单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin, 相邻盒四向净距恒 = box_gap; "外协文字"层MText为幅标记, 行内追加锚定上一幅单元盒右缘, 无会话游标时由几何反推本行盒右缘(dt:sz-row-right, 弃"文字 maxx"旧基准); [排版] box_gap/per_row/text_gap/box_margin 四项可配；剪贴板格式 350*180**；主进胶ZJJ与DP白名单提取；数据图纸独立图层隔离防测量干扰；v2.11 配色重排(FLB_BOX 赭黄42/数据图纸 橄榄绿63/外协文字 深青144)；v2.12 精雕配色(JD 黄2: 层色+精雕实体统一置黄/外协包络盒 绿3: 层色+盒实体色；精雕为独立 dwg, 与主图 JRT 黄2/FBX 绿3 同色按用户定案豁免配色门禁唯一性(B)与色差(C))；全文件零 (command) 主流程(COM标记撤销)） |
-| 引导器      | `dt_start.lsp`（**v3.4**，804 行，31 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽/外协加工/工具, 外协加工三级序=测量分流板/测量加热条长度/线切割/精雕/数据图纸, 工具内含演示记录器 DTDEMO 按需加载 demo_recorder.lsp)+**boot/DTRELOAD 逐家族加载验证**(主命令缺失=半加载, 明确警告)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本） |
-| 演示记录器   | `demo_recorder.lsp`（**v1.1**，348 行，18 defun，开发辅助工具：命令级反应器把手工操作录成 AI 可读日志；v1.1 补盲区(ESC/异常退出的命令也记新建实体+记录被删实体+INIT 全量清单)；菜单 DTDEMO 按需加载，命令 DEMOREC/DEMOSTOP/DEMOMARK） |
-| 校验工具     | `tools\check_lisp.py`（按文件名自动区分清单 flb/cx/jrt/wx/dt_start/demo 六套：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限）                                                                                                                                                                                                                                                     |
-| 审查工具     | `tools\_audit.py`（按自身位置定位 \`..\scripts\ 的 LSP；跨五文件静态审计：①同名不同体函数 ②从未被引用的死函数 ③未声明的全局变量泄漏 ④未使用的形参/局部 ⑤未定义函数引用）                                                                                                                                                                                                                                            |
-| 冲突工具     | `tools\_collide.py`（脚本同名函数冲突检测；跨文件同名必须逐字一致）                                                                                                                                                                                                                                                                                                            |
-| 编码工具     | `tools\make_ansi.py`（**发版必跑**：scripts\ UTF-8 → scripts_ansi\ GBK 副本 + 逐字节读取器模拟校验，供车间 2007~2020 老电脑部署，坑 #64）                                                                                                                                                                                                                                                 |
-| 兼容门禁     | `tools\check_sysvars.py`（**发版必跑**：系统变量读取的「nil 泄漏」静态门禁——版本相关变量(TRUSTEDPATHS/SECURELOAD/ROAMABLEROOTPREFIX/LOCALROOTPREFIX/DWGPREFIX…)必须走 `dt:st-gets`/`dt:st-hasvar`，且 getvar 结果不得直接作 strcat/strlen 实参；坑 #65。反向验证：v2.8 命中 5 处风险，v2.9 全过）                                                                                                                |
-| 回归门禁     | `tools\test_direction.py`（**16 组 89 断言**, 纯 stdlib: 点内判定/封口/颈向/压线板排布与模板/镜像弧角闭合(v11.7)/内外壁取侧(v11.7), 口径锚定 tools\1.dxf·2.dxf 实测）+ `tools\check_audit_fixes.py`（14 项体检修复回归）+ `tools\check_defun_depth.py`（defun 顶层深度门禁）+ `tools\check_layer_colors.py`（图层配色门禁: 全脚本登记色一致/唯一/两两 Lab 色差 ≥30, 伴生 `tools\_aci_colors.py` 标准色表）+ `tools\check_jrt2_out.py`（JRT 通用二产物检查, 需 AutoCAD 出图后人工执行; 口径=1714 测试图, 已移出仓库, 重跑需自备同图; **v9.36 起口径回归单层 "JRT"**——封闭线本体在 JRT, JRTFBX 只是定位副本, v9.34 的"两层并集"口径已废）；均带退出码阻断, 命令清单见根目录 AGENTS.md §2 |
-| 版本命名     | 每次改动交付 `*_v<N><M>.lsp`（去点：v9.5→`_v95`）；v9.9 之后进 v10→`_v10`。**正式投用版无版本后缀**（`flb_runner.lsp` 等四个脚本 + `dt_start.lsp`），dt_start 优先加载正式版                                                                                                                                                                                                                                      |
-| 历史备份     | 本目录保留全部旧版；更早(v4~v820)在 `C:\Users\5600\WorkBuddy\2026-08-18-16-15-32\autocad-offset-tool\`；多文件试验场(已废弃)在 `Documents\2D3D`、`Documents\dph\autocad`                                                                                                                                                                                                        |
-| 目标平台     | AutoCAD 2024（2007+）；AutoLISP + Visual LISP (COM) + DCL                                                                                                                                                                                                                                                                                                 |
+| 项 | 内容 |
+|---|---|
+| 工作目录 | `C:\Users\5600\Desktop\ZDH\HYT-CAD\`（仓库根目录，2026-09-16 实测；旧记 `Documents\ZDH\HYT-CAD` 本机不存在），Git 远程 `xlzxld/HYT-CAD`；2026-08-30 发版并分类：**`scripts\` = 6 .lsp 入库 + ini/dcl 运行生成物(脚本启动/弹框时自动再生, 2026-09-09 起移出仓库不入 git)合成一个运行单位**；`scripts_ansi\` = 6 个老版本 GBK 编码脚本副本(供 2007~2020 老电脑使用, 坑 #64)；`tools\` = check_lisp/\_audit/\_collide/make_ansi/check_sysvars/check_defun_depth/check_audit_fixes/test_direction/check_jrt2_out/check_layer_colors/\_aci_colors/**deploy_old_pc**（生成本仓一键移植包，见 §11 第 6 步）；根目录 = 5 份 md(README 首页总览 / README_CAD 操作手册 / AGENTS 协作契约 / AGENTS_CAD 本文件 / CHANGELOG 版本历史) + **`一键生成移植包.bat`（双击即出老机移植包，= make_ansi + check_lisp×6 + deploy_old_pc）**；`.agents\` 下另有 AUDIT-SPEC / BOOTSTRAP 两份契约外置件。自启钩子指向 scripts\dt_start.lsp） |
+| 改前备份 | 无固定目录（原 test\pc\ 已随发版删除）——改动前自行 `cp` 原件到临时位置, 用完即删, **勿在 CAD\ 内留第二份 .lsp**（坑 #35/#49 多副本误载） |
+| 主脚本(分流板) | `flb_runner.lsp`（**v10.11**，2662 行，101 defun，多模板 通用/矩形，命令 FLB/FLBPARAM，保留 c:OFF 兼容别名；假体默认传统逐步, 参数框勾选「包络法」切换；参数「主进胶R (zjj_r 14.35)」与图层 ZJJ，自动扫描 DP 圆心生成主进胶圆；v10.11 预建清单扩为 15 层(新增 JRTFBX)+全图层配色重排+ensure-layer 已存在也校正登记色) |
+| 出线槽脚本 | `cx_runner.lsp`（**v11.9**，1948 行，81 defun，命令 CX/CXPARAM，保留 c:SLOT 兼容别名；断口圆角函数 `dt:slot-fillet-pair`，CXK 图层青绿 122；**生成出线槽时自动布置压线板**(YXB 图层深绿 84, 模板=v11.2 新 D 形 6 件(重合线16.6/上下边11/右边15.3/R4.3弧×2, 出自更新后 tools\1.dxf), 重合线中点(白线交界)=定位点, 沿选定壁 gap 均匀分布整组居中+斜壁旋转, **壁候选=直线+多段线直段(v11.3), 弧段跳过+失败自诊断计数**, plan/place 两步——删源线前规划/删源线后放置, 无碰撞判断, entnext 全库扫描死循环已根治; **v11.7 左壁畸形根治**(镜像系弧角区间反向) + **运行时可选 内壁(I)/外壁(O) 整圈一致取侧**(相连源线中点投票, 左/右壁语义保留))；全文件零 (command) 主流程(COM标记撤销, 坑 #69 根除)） |
+| 加热条脚本 | `jrt_runner.lsp`（**v9.36**，3122 行，119 defun，多模板 通用一/通用二，命令 JRT/JRTPARAM；**封闭线定位层 JRTFBX(浅橙 21)**——v9.36 定案: 通用二破口封闭线**本体在 JRT**(加热条结构完整, 与 v9.33 一致), "JRTFBX" 仅为其同几何定位副本(dt:jrt2-trace, 供另一项目建模脚本按层定位; 不在外协白名单, 不进数据图纸/精雕出图, 重跑随产物自清)；通用二支持**单线自动补边**——外壁整圈 + JRTDW 定位线(长线一头埋板内亦可, 两端按轮廓围合区域分里外; 通道线裁板内侧留板边侧+外端延长保留), 出线口自动开出, **圆弧/圆外壁通道线双端自动延伸(参数 jrt2_hook_ext 默认5, 0=旧行为)**；**方向几何判定(v9.25/26/27)**: 嵌套内偏=整环传播 A/B 两候选环取离 FLB 壁更远者朝内(围合奇偶→JRTDW 逐级回退)/颈线=FLB 围合区 24 段采样奇偶判外(L 形非凸也对, 包围盒中心兜底)；vlax-curve nil 返回全双判(numberp: nil 崩溃已根治)；坑 #73 已根治(undo-mark 缺括号吞函数, hook-one 等回顶层)；全文件零 (command) 调用, 坑 #69 根除) |
+| 尺寸测量与外协 | `wx_runner.lsp`（**v2.18**，2488 行，75 defun，独立第 4 脚本，命令 FLBSZ/JRTSZ/XQG/JD/SJTZ；**测量加热条长度(v2.17, JRTSZ)**——JRT 曲线按归堆间距聚条(可配 [测量加热条] strip_gap 默认15)/长度=各层嵌套线取中间值/封闭线排除双通道(JRTFBX 副本精确匹配优先 + 几何复核=生成规则反推: 两头都接线的短直线试剔, 剔后线链"几乎等长"才确认, 圆弧一律不动)/多条点选连测/无加热条·仅1条开口线·端点断口0.01~2mm 即弹窗取消不降级手动选；工件倾斜自动正交摆正；**精雕镜像在本体右侧(竖直轴,间隔75mm)，每幅(本体+镜像+文字)绿色包络盒框住(实体级颜色,盒=内容精确bbox)；精雕/线切割 网格排版(v2.13 根治间距): 单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin, 相邻盒四向净距恒 = box_gap; "外协文字"层MText为幅标记, 行内追加锚定上一幅单元盒右缘, 无会话游标时由几何反推本行盒右缘(dt:sz-row-right, 弃"文字 maxx"旧基准); [排版] box_gap/per_row/text_gap/box_margin 四项可配；剪贴板格式 350*180**；主进胶ZJJ与DP白名单提取；数据图纸独立图层隔离防测量干扰；v2.11 配色重排(FLB_BOX 赭黄42/数据图纸 橄榄绿63/外协文字 深青144)；v2.12 精雕配色(JD 黄2: 层色+精雕实体统一置黄/外协包络盒 绿3: 层色+盒实体色；精雕为独立 dwg, 与主图 JRT 黄2/FBX 绿3 同色按用户定案豁免配色门禁唯一性(B)与色差(C))；全文件零 (command) 主流程(COM标记撤销)） |
+| 引导器 | `dt_start.lsp`（**v3.6**，814 行，31 defun；一键加载+随 CAD 自启动+**顶部菜单「热流道自动化(R)」**(二级序: 分流板/加热条/出线槽/外协加工/工具, 外协加工三级序(v3.5 用户指定, 使用频率)=测量加热条长度/测量分流板/数据图纸/线切割/精雕, 工具内含演示记录器 DTDEMO 按需加载 demo_recorder.lsp)+**boot/DTRELOAD 逐家族加载验证**(主命令缺失=半加载, 明确警告)；v2.9 起含 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 低版本兼容底座，**全版本通用**（2026-08-31 AutoCAD 2007 实测通过）。发版后无独立 old 副本） |
+| 演示记录器 | `demo_recorder.lsp`（**v1.1**，348 行，18 defun，开发辅助工具：命令级反应器把手工操作录成 AI 可读日志；v1.1 补盲区(ESC/异常退出的命令也记新建实体+记录被删实体+INIT 全量清单)；菜单 DTDEMO 按需加载，命令 DEMOREC/DEMOSTOP/DEMOMARK） |
+| 校验工具 | `tools\check_lisp.py`（按文件名自动区分清单 flb/cx/jrt/wx/dt_start/demo 六套：括号 stack/BOM/UNDO/死名/代码区非 ASCII/if 参数超限） |
+| 审查工具 | `tools\_audit.py`（按自身位置定位 \`..\scripts\ 的 LSP；跨五文件静态审计：①同名不同体函数 ②从未被引用的死函数 ③未声明的全局变量泄漏 ④未使用的形参/局部 ⑤未定义函数引用） |
+| 冲突工具 | `tools\_collide.py`（脚本同名函数冲突检测；跨文件同名必须逐字一致） |
+| 编码工具 | `tools\make_ansi.py`（**发版必跑**：scripts\ UTF-8 → scripts_ansi\ GBK 副本 + 逐字节读取器模拟校验，供车间 2007~2020 老电脑部署，坑 #64） |
+| 兼容门禁 | `tools\check_sysvars.py`（**发版必跑**：系统变量读取的「nil 泄漏」静态门禁——版本相关变量(TRUSTEDPATHS/SECURELOAD/ROAMABLEROOTPREFIX/LOCALROOTPREFIX/DWGPREFIX…)必须走 `dt:st-gets`/`dt:st-hasvar`，且 getvar 结果不得直接作 strcat/strlen 实参；坑 #65。反向验证：v2.8 命中 5 处风险，v2.9 全过） |
+| 回归门禁 | `tools\test_direction.py`（**16 组 89 断言**, 纯 stdlib: 点内判定/封口/颈向/压线板排布与模板/镜像弧角闭合(v11.7)/内外壁取侧(v11.7), 口径锚定 tools\1.dxf·2.dxf 实测）+ `tools\check_audit_fixes.py`（14 项体检修复回归）+ `tools\check_defun_depth.py`（defun 顶层深度门禁）+ `tools\check_layer_colors.py`（图层配色门禁: 全脚本登记色一致/唯一/两两 Lab 色差 ≥30, 伴生 `tools\_aci_colors.py` 标准色表）+ `tools\check_jrt2_out.py`（JRT 通用二产物检查, 需 AutoCAD 出图后人工执行; 口径=1714 测试图, 已移出仓库, 重跑需自备同图; **v9.36 起口径回归单层 "JRT"**——封闭线本体在 JRT, JRTFBX 只是定位副本, v9.34 的"两层并集"口径已废）；均带退出码阻断, 命令清单见根目录 AGENTS.md §2 |
+| 版本命名 | 每次改动交付 `*_v<N><M>.lsp`（去点：v9.5→`_v95`）；v9.9 之后进 v10→`_v10`。**正式投用版无版本后缀**（`flb_runner.lsp` 等四个脚本 + `dt_start.lsp`），dt_start 优先加载正式版 |
+| 历史备份 | 本目录保留全部旧版；更早(v4~v820)在 `C:\Users\5600\WorkBuddy\2026-08-18-16-15-32\autocad-offset-tool\`；多文件试验场(已废弃)在 `Documents\2D3D`、`Documents\dph\autocad` |
+| 目标平台 | AutoCAD 2024（2007+）；AutoLISP + Visual LISP (COM) + DCL |
 
 **四脚本架构（2026-09-03 起，2026-09-04 更名）**：flb_runner(原 offset_runner) 只画分流板（命令 FLB/OFF）；cx_runner(原 slot_runner) 只画出线槽（命令 CX/SLOT）；jrt_runner 只画加热条（LD 偏移/裁剪/端帽/多层嵌套轮廓/多模板）；**wx_runner（原 size_runner）独立负责外协加工与尺寸数据测量（分流板最长最宽/双引擎闭合校验/剪贴板写入/FLB_BOX 标注，线切割/精雕外协自动出图，数据图纸文本块生成）**。各脚本**各自自包含**（公共几何库逐字复制），可单独或同时加载——除逐字相同的库函数外，参数表、对话框、dcl 文件、回调函数全部不同名隔离；凡**同名不同体**的函数一律改名隔离（坑 #46）。四个脚本家族在 `dt_start.lsp` 的 `dt:st-families` 统一注册，各对应一个二级菜单，二级菜单内再分布三级子项。
 
@@ -67,18 +67,27 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 ### 2.3 版本兼容性（2026-08-31 编码补丁 + v2.9 低版本修复后定案）
 
-| AutoCAD 版本              | 四脚本（flb/cx/jrt/wx）             | 自启动               | 顶部菜单                    | 结论                                  |
-| ----------------------- | ------------------------------- | ----------------- | ----------------------- | ----------------------------------- |
-| **2007**（32位）           | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅                 | ✅ MenuGroups.Add 老版原生可用 | **已实测通过**（2026-08-31，dt_start v2.9） |
-| 2008/2009（32位）          | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅                 | ✅ MenuGroups.Add 老版原生可用 | 可用（与 2007 同代，预期一致）                  |
-| 2010~2015               | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅                 | ✅                       | 可用                                  |
-| 2016~2020               | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅ TRUSTEDPATHS 生效 | ✅                       | 可用                                  |
-| 2021~2023（Unicode LISP） | ✅ 用 scripts\ 的 UTF-8 原版         | ✅                 | ✅ 回退已覆盖                 | 可用                                  |
-| **2024**                | ✅ 实测（UTF-8 原版）                  | ✅ 实测              | ✅ 实测                    | 已验证                                 |
-| 2025/2026               | 预计 ✅（UTF-8 原版）                  | 预计 ✅              | 按下方清单验证                 | 待验证                                 |
-| AutoCAD LT（任意年份）        | ❌                               | ❌                 | ❌                       | **不支持**：LT 的 LISP 无 vla-* COM       |
+| AutoCAD 版本 | 四脚本（flb/cx/jrt/wx） | 自启动 | 顶部菜单 | 结论 |
+|---|---|---|---|---|
+| **2007**（32位） | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅ | ⚠️ 菜单能挂出，但 **`MenuGroups.Add` 实测不可用**（2026-09-16 报「未知名称: Add」，与 2024 同病）→ 自动回退"把 popup 塞进 ACAD 主菜单组"，该回退路径有隐患，见下方注 | **已实测**（2026-08-31 安装/自启/全命令；2026-09-16 复核菜单路径） |
+| 2008/2009（32位） | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅ | ⚠️ 同上（回退 ACAD 主菜单组） | 可用（与 2007 同代，预期一致） |
+| 2010~2015 | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅ | ✅ | 可用 |
+| 2016~2020 | ✅ **须用 scripts_ansi\ 的 GBK 副本** | ✅ TRUSTEDPATHS 生效 | ✅ | 可用 |
+| 2021~2023（Unicode LISP） | ✅ 用 scripts\ 的 UTF-8 原版 | ✅ | ✅ 回退已覆盖 | 可用 |
+| **2024** | ✅ 实测（UTF-8 原版） | ✅ 实测 | ✅ 实测 | 已验证 |
+| 2025/2026 | 预计 ✅（UTF-8 原版） | 预计 ✅ | 按下方清单验证 | 待验证 |
+| AutoCAD LT（任意年份） | ❌ | ❌ | ❌ | **不支持**：LT 的 LISP 无 vla-* COM |
 
 > **2007 实测记录（2026-08-31）**：GBK 副本 APPLOAD 成功 → `DTINSTALL` 一次通过 → 三脚本加载 + 顶栏菜单挂出。此前 v2.8 在同一台 2007 上 `DTINSTALL` 报「参数类型错误: stringp nil」（坑 #65），v2.9 修复后即通过。**注意**：2007 无 `TRUSTEDPATHS`（2016 才引入），安装时该步会打印"无(老版本, 跳过)"，属正常。
+>
+> **⚠️ 顶部菜单在 2007 上的更正（2026-09-16 用户实测复核）**：原表写"MenuGroups.Add 老版原生可用"**与实测不符** ——
+> 该机 `MenuGroups.Add` 报「未知名称: Add」（与 2024 同样不可用），因此走的是"把 popup 用 COM 塞进 ACAD 主菜单组"的兜底路径。
+> 该路径的已知隐患：**AutoCAD 会在任何菜单栏刷新时抛 Automation 错误**
+> （如「参数 热流道自动化(&R) (位于 Item 中) 无效」/「无效索引」），
+> 这种错误 `vl-catch-all-apply` **抓不住，且会打断正在执行的命令**。
+> 关联未解缺陷：`c:JRT` 选「通用二」时即在"模板选择框刚返回"处被此错误打断（详见 §10 末尾的排查记录）。
+> 2026-09-16 夜里针对它试过 4 版修法（v3.9~v3.12，含"默认不建 COM 菜单"），**均未解决且引入更多问题**，
+> 已整体回滚（代码回到 v3.6 行为）。**下轮动手前必须先做"不建菜单也能不能复现"的最小实验。**
 
 - **编码红线（坑 #64, 2026-08-31 实锤）**：≤2020 的 AutoCAD 是 MBCS(GBK) LISP，其读取器按双字节规则解析文件——加载 UTF-8 版 .lsp 时中文注释/字符串的字节被当作 GBK 双字节字符吞掉换行/引号/括号/点号，报「错误: 输入中的点位置不正确」（2007 实测，横幅都来不及打印）。**2007~2020 一律部署 `scripts_ansi\` 的 GBK 副本（覆盖 scripts\ 同名文件即可）；2021+ 用 scripts\ 的 UTF-8 原版**。副本由 `python tools\make_ansi.py` 从原件生成（含逐字节读取器模拟校验），**每次改版 scripts\ 后必须重跑**。原「全版本通用一份文件」的结论作废——API 层面仍全版本通用，文件编码层面分两份。
 - **v2.9 起 `dt_start.lsp` 真正全版本通用（坑 #65，2007 实测定案）**：v2.6 只把 TRUSTEDPATHS 的 getvar/setvar 包了 `vl-catch-all-apply`，**只挡住"抛异常"这半边**；老版本读本版本没有的系统变量时是**静默返回 nil**，nil 漏出后被喂进 `strcat`/`strlen` 就报 `参数类型错误: stringp nil`（DTINSTALL 当场中断，无任何中文提示）。v2.9 新增兼容底座把三种情况（抛错 / nil / 非字符串）统一收敛：
@@ -93,16 +102,16 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 - 2025/2026 验证清单：① APPLOAD+DTINSTALL ② 顶栏菜单+OFF 弹框 ③ 改 ini→恢复默认 ④ 重启自动挂载+DTRELOAD/DTUNINSTALL；异常按坑 #50~#62 输出定位。
 
 
-### 2.4 参数配置文件与记忆（flb v10.11 / cx v11.8 / jrt v9.36 / wx v2.17）
+### 2.4 参数配置文件与记忆（flb v10.11 / cx v11.9 / jrt v9.36 / wx v2.18）
 
 > ini/dcl/\*_mem.ini 均为**运行生成物**：2026-09-09 起已移出 Git（`.gitignore` §2.2 全局排除 `*.ini`/`*.dcl`），新机部署无需携带——ini 由 `dt:*-cfg-boot` 首次运行自动生成，dcl 由 `dt:*-write-dcl` 弹框时生成，mem 为本机参数记忆。
 
-| 文件（脚本目录，TEMP 兜底）                       | 内容                                                                      | 谁写                |
-| -------------------------------------- | ----------------------------------------------------------------------- | ----------------- |
-| `flb_runner.ini` / `jrt_runner.ini` | 默认值，按模板分节 `[通用]`/`[矩形]`/`[通用一]`/`[通用二]`，`键 = 数值` + `; 中文注释`（labels 表生成） | 首次运行自动生成，用户记事本改   |
-| `cx_runner.ini`                      | 同上，固定节 `[参数]`（无模板；v10.1 起也带中文注释；v10.5 起含压线板间距 `cx_yxb_gap`）   | 同上                |
-| `wx_runner.ini`                      | **只被读取不回写**：`[线切割]`/`[精雕]` 的 `root` 出图根路径 + `[排版]` 四项（box_gap/per_row/text_gap/box_margin）；缺失则回退代码内置默认 | 用户记事本改（脚本不写）       |
-| `*_mem.ini`（三个：flb/cx/jrt）            | 上次值记忆 + 单独一行写出的 `[模板] template=下标`（**只写一次**，v10.2d/v9.13 修复重复节）         | 程序在**确定参数框时**自动保存 |
+| 文件（脚本目录，TEMP 兜底） | 内容 | 谁写 |
+|---|---|---|
+| `flb_runner.ini` / `jrt_runner.ini` | 默认值，按模板分节 `[通用]`/`[矩形]`/`[通用一]`/`[通用二]`，`键 = 数值` + `; 中文注释`（labels 表生成） | 首次运行自动生成，用户记事本改 |
+| `cx_runner.ini` | 同上，固定节 `[参数]`（无模板；v10.1 起也带中文注释；v10.5 起含压线板间距 `cx_yxb_gap`） | 同上 |
+| `wx_runner.ini` | **只被读取不回写**：`[线切割]`/`[精雕]` 的 `root` 出图根路径 + `[排版]` 四项（box_gap/per_row/text_gap/box_margin）；缺失则回退代码内置默认 | 用户记事本改（脚本不写） |
+| `*_mem.ini`（三个：flb/cx/jrt） | 上次值记忆 + 单独一行写出的 `[模板] template=下标`（**只写一次**，v10.2d/v9.13 修复重复节） | 程序在**确定参数框时**自动保存 |
 
 - **语义**：预填=全局变量（加载时 boot 已从 mem 恢复上次模板+该模板上次值）；**恢复默认按钮 = ini 配置值**（无该键回模板内置默认→表 caddr 三级兜底）；**切换模板 = 该模板记忆值→ini 节→模板内置默认→caddr**；ini **每次弹框前重读**（改完保存即生效，无需 DTRELOAD）；取消对话框不触发保存。
 - **实现**：各脚本尾部 `(dt:off-cfg-boot)` / `(dt:slot-cfg-boot)` / `(dt:jrt-cfg-boot)`（文件尾调用，定义在前）；解析器只认"键 = 数值"行（distof 校验，0 合法），注释/乱码/未知键跳过；全程 vl-catch-all，文件缺失/损坏静默回退内置默认。函数名带脚本前缀隔离（坑 #46）。
@@ -112,22 +121,22 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 ## 3. 图层约定（v9.4 起拼音缩写）
 
-| 缩写    | 含义     | 颜色   | 说明                                   |
-| ----- | ------ | ---- | ------------------------------------ |
-| LD    | 流道线    | 白 7  | 分流板源中心线（用户画，脚本不碰）                    |
-| FLB   | 分流板    | 红 1  | 含并入的封口线/倒角斜线                         |
-| FBX   | 封闭线    | 绿 3  | **流程临时层**：倒角后并入 FLB 并删除（第 9.5 步）     |
-| LS    | 螺丝     | 青 4  | v9.6 起单圆                             |
-| JT    | 分流板假体  | 洋红 6 | v9.1 前称"分流板挖孔"                       |
-| JTFBX | 假体封闭线  | 玫红 230 | **流程临时层**：圆角后并入 JT 并删除（第 15.5 步）   |
-| RZ    | 热咀     | 橙 30 | 热咀圆 R11.35                           |
-| DK    | 点孔     | 灰 8  | 点孔圆 R3（与热咀同心）                        |
-| DP    | 垫片     | 蓝 5  | **预留层**：只创建不自动画、不参与清理（用户手画）          |
-| ZJJ   | 主进胶   | 灰紫 193 | 自动检测 DP 圆并在其圆心生成 R14.35 主进胶圆(flb_runner 管理) |
-| CX    | 出线槽    | 浅蓝 161 | 源线+通道壁+圆角弧+封闭线同层（cx_runner 管理）     |
-| CXK   | 出线口封闭线 | 青绿 122 | v9.9：距 DP 最远的那条封闭线自动分流到此层（cx 创建）   |
-| YXB   | 压线板   | 深绿 84 | v10.5 出线槽自动布置压线板（cx 管理；D 形模板, 重合线贴壁, 定位点=重合线中点, 每次运行先清旧实例；v11.8 配色重排 4→84 与 LS 青 4 区分） |
-| JRT   | 加热条    | 黄 2  | 多层嵌套轮廓+端帽同层（jrt_runner 管理；纯产物层，重跑全清） |
+| 缩写 | 含义 | 颜色 | 说明 |
+|---|---|---|---|
+| LD | 流道线 | 白 7 | 分流板源中心线（用户画，脚本不碰） |
+| FLB | 分流板 | 红 1 | 含并入的封口线/倒角斜线 |
+| FBX | 封闭线 | 绿 3 | **流程临时层**：倒角后并入 FLB 并删除（第 9.5 步） |
+| LS | 螺丝 | 青 4 | v9.6 起单圆 |
+| JT | 分流板假体 | 洋红 6 | v9.1 前称"分流板挖孔" |
+| JTFBX | 假体封闭线 | 玫红 230 | **流程临时层**：圆角后并入 JT 并删除（第 15.5 步） |
+| RZ | 热咀 | 橙 30 | 热咀圆 R11.35 |
+| DK | 点孔 | 灰 8 | 点孔圆 R3（与热咀同心） |
+| DP | 垫片 | 蓝 5 | **预留层**：只创建不自动画、不参与清理（用户手画） |
+| ZJJ | 主进胶 | 灰紫 193 | 自动检测 DP 圆并在其圆心生成 R14.35 主进胶圆(flb_runner 管理) |
+| CX | 出线槽 | 浅蓝 161 | 源线+通道壁+圆角弧+封闭线同层（cx_runner 管理） |
+| CXK | 出线口封闭线 | 青绿 122 | v9.9：距 DP 最远的那条封闭线自动分流到此层（cx 创建） |
+| YXB | 压线板 | 深绿 84 | v10.5 出线槽自动布置压线板（cx 管理；D 形模板, 重合线贴壁, 定位点=重合线中点, 每次运行先清旧实例；v11.8 配色重排 4→84 与 LS 青 4 区分） |
+| JRT | 加热条 | 黄 2 | 多层嵌套轮廓+端帽同层（jrt_runner 管理；纯产物层，重跑全清） |
 | JRTFBX | 加热条封闭线定位层 | 浅橙 21 | v9.36：通用二破口封闭线的**同几何定位副本**（本体在 JRT；供另一项目建模脚本按层定位, 不在外协白名单；OFF 预建, 通用二描并重跑自清） |
 | JRTDW | 加热条定位 | 浅黄绿 61 | 通用二出线口位置标记（用户画, 一条线穿过外壁指向板边；v9.24 起内外方向几何判定, 与其画向无关） |
 | FLB_BOX | 分流板外包矩形及标注 | 赭黄 42 | 分流板最长最宽包络参考框与字高 15 线性标注（FLBSZ 管理） |
@@ -140,19 +149,19 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 ## 4. 完整流程
 
-### 4.1 `c:FLB`（兼容 `c:OFF`，flb_runner v10.11，行 2417；v9.8 起先弹**模板选择框**[通用/矩形]，取消中止）
+### 4.1 `c:FLB`（兼容 `c:OFF`，flb_runner v10.11，v9.8 起先弹**模板选择框**[通用/矩形]，取消中止）
 
-0 选模板(**通用**=下述现状全流程，行为零变化；**矩形**=`dt:rect-process` 自管全流程，见 §7) → 0.5 弹参数框(取消中止；v9.9 起按模板动态显示参数键；v10.8 新增主进胶 R 参数 `zjj_r` 默认 14.35) → 1 检查 LD 层 → 2 全选 → 3 建 15 层(FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW/JRTFBX/ZJJ) → 3.5 清理旧产物(含 RZ/DK/ZJJ；**不清 DP、不清 CX**) → 4 偏移35→FLB → 5 裁剪 → 6 断口圆角R15 → 7 通道封口→FBX → **7.5 热咀+点孔圆**(RZ/DK，须在倒角前：倒角后 FBX 混入斜线无法按层识别) → 8 螺丝孔(单圆，必须在倒角前) → 9 倒角 → **9.5 FBX 并入 FLB 并删层**(v9.1) → **10~15.5 假体(v10.2 包络法，见 §7；FLB 为空/外扩量过小时回退旧五步：LD偏移50→带状裁剪→断口圆角→延长15→端点封口→封口圆角→并层)** → **16.5 自动检测 DP 图层上的圆并在其圆心创建 ZJJ 主进胶圆(R14.35)** → 17 统计。（以上大括号前为通用模板流程，行号参考）
+0 选模板(**通用**=下述现状全流程，行为零变化；**矩形**=`dt:rect-process` 自管全流程，见 §7) → 0.5 弹参数框(取消中止；v9.9 起按模板动态显示参数键；v10.8 新增主进胶 R 参数 `zjj_r` 默认 14.35) → 1 检查 LD 层 → 2 全选 → 3 建 15 层(LD/FLB/FBX/LS/JT/JTFBX/RZ/DK/DP/CX/CXK/JRT/JRTDW/JRTFBX/ZJJ) → 3.5 清理旧产物(含 RZ/DK/ZJJ；**不清 DP、不清 CX**) → 4 偏移35→FLB → 5 裁剪 → 6 断口圆角R15 → 7 通道封口→FBX → **7.5 热咀+点孔圆**(RZ/DK，须在倒角前：倒角后 FBX 混入斜线无法按层识别) → 8 螺丝孔(单圆，必须在倒角前) → 9 倒角 → **9.5 FBX 并入 FLB 并删层**(v9.1) → **10~15.5 假体(v10.2 包络法，见 §7；FLB 为空/外扩量过小时回退旧五步：LD偏移50→带状裁剪→断口圆角→延长15→端点封口→封口圆角→并层)** → **16.5 自动检测 DP 图层上的圆并在其圆心创建 ZJJ 主进胶圆(R14.35)** → 17 统计。（以上大括号前为通用模板流程，行号参考）
 
-### 4.2 `c:CX`（兼容 `c:SLOT`，cx_runner v11.8，行 1911；`dt:cx-process` 行 1387，压线板链 `dt:cx-yxb-*` 行 1600+）
+### 4.2 `c:CX`（兼容 `c:SLOT`，cx_runner v11.9，`dt:cx-process` 压线板链 `dt:cx-yxb-*`）
 
 0 弹参数框 → 检查 CX 层 → 只对**源线**(eName 记录)偏移 17.5 生成通道壁(源线同层保留) → 1 区域裁剪(exclude 源线) → 2 小圆角R15 → 3 悬空端头固定延长 50 → 4 **收头+大圆角**(v9.5/7)：每条延长壁沿方向找第一个交点并收头(=FILLET 自带修剪)；交点处双方端头重合→与小圆角**同一套 fillet-pair 仅换 R30**(nochk=T)；端头落在宿主壁内部(T形)→打断宿主壁取同侧断头配对；未命中→复原 → 5 **封闭**(v9.6/7)：每个敞口(源线悬空端的两壁端头，距源线端点≈17.5)连一条封闭线；**收尾 CXK 分流**(v9.9)：距 DP(垫片)最远的那条封闭线移入 CXK 层(青绿 122，DP 为空则提示跳过) → 6 **删除全部源线**(v9.6，重跑需重画源线)。**垫片要在跑 CX 之前画好才会分流出 CXK**。
 
-### 4.3 `c:JRT`（jrt_runner v9.36，行 3035；`dt:jrt-build`(1503)/`dt:jrt-decide`(1242)/通用二 `dt:jrt2-process`(2397)）
+### 4.3 `c:JRT`（jrt_runner v9.36，`dt:jrt-build`/`dt:jrt-decide`/通用二 `dt:jrt2-process`）
 
 0 弹参数框/选模板(v9.8 多模板) → 1 检查 LD 层 → 2 建 JRT 层(黄2)+清上轮产物 → 3 检查 RZ 层(无→警告，端头全部退化为直线帽) → 4 **端帽统一判定**(`dt:jrt-decide`，各层共用)：自由端头(端点不落在其他 LD 线上)逐一算 `gap = 本LD线与不相交LD线的最小轴线距 − 2×偏移值`，|gap−偏移值|≤1 且匹配到 RZ → 圆帽；否则直线帽；gap 过近 → 告警+直线帽 → 5 **多层构建**(`dt:jrt-build`，k=0..N)：每层 = 偏移 LD→JRT → LD±半宽带状裁剪(仅本层实体，eName 快照差集隔离) → 端帽(圆帽=RZ圆心整圆R=半宽+侧线修到切点；直线帽=LD端点平面向内偏 inset 画帽线+侧线端头修到帽平面) → 统一断口圆角(交汇断口+帽角同一套 jrt-fillet-pair) → 零长残段清理 → 6 统计。**不读 FBX**：全部几何由 LD+RZ 推导。参数：jrt_fillet_r 19(内层逐层+step=同心弧)、jrt_cap_r 29(≥半宽时封闭线=相切圆弧)、jrt_inner_count 2(层数=次数+1)；默认自洽 40−11=29=半宽。
 
-### 4.4 `c:FLBSZ` / `c:JRTSZ` / `c:XQG` / `c:JD` / `c:SJTZ`（wx_runner v2.17，外协加工与测量工具箱；行号：FLBSZ 1998 / JRTSZ 2115 / XQG 2211 / JD 2259 / SJTZ 2285，别名 `c:FLBSIZE`/`c:SZ`/`c:WXSZ` 均指向 FLBSZ）
+### 4.4 `c:FLBSZ` / `c:JRTSZ` / `c:XQG` / `c:JD` / `c:SJTZ`（wx_runner v2.18，外协加工与测量工具箱；别名 `c:FLBSIZE`/`c:SZ`/`c:WXSZ` 均指向 FLBSZ）
 
 - **FLBSZ 测量分流板**：0 探测 FLB 图层；0.5 检验闭合(双引擎：vla-AddRegion + 端点 0.5mm 拓扑度数，若检测到多独立连通域自动警示多份包络并提示手动框选目标)；1 手动选线闭合校验；2 AABB+OBB 最佳包络矩形计算最长与最宽；3 自动写入剪贴板(如 350x180)；4 交互式确认后在 FLB_BOX 绘制包络矩形与长宽标注(字高≥15)。
 - **JRTSZ 测量加热条长度(v2.17)**：0 提取 JRT 图层曲线(无→弹窗取消, 不降级手动选)；0.5 封闭线标记——JRTFBX 实体与 JRT 直线两端点重合(<0.5)即精确剔除；1 归堆=最小间距聚类分条(**可配 wx_runner.ini [测量加热条] strip_gap 默认 15, 误填<1 回落默认**; bbox 预过滤+双向采样投影求距)；2 逐条建模(缓存端点/邻接, 端点贴"无端点曲线"线身也算相接——通用一圆帽整圆)→**几何复核剔除(v2.16 重做, 生成规则反推, 用户定案只剔封闭线本身圆弧不动)**: 候选=两头都接在别的曲线端点上的短直线(<max(6%全条长,40)), 单根/成对试剔(成对只试最短 12 根), 剔后线链"几乎等长"(极差变小且最短/最长≥0.8 单剔/0.45 成对)才确认, 剔后更乱一律不动——嵌套轮廓各层长度天生几乎相等即判据; 3 各层嵌套线长度取**中间值**；4 单条自动测, 多条列表点选连测(就近匹配点选位置)；5 完整性守卫——仅 1 条开口线/端点断口 0.01~2mm→弹窗取消；短链/整圆/各层差异>20% 仅提示不取消；6 结果写剪贴板+弹窗+各层线长明细。只读测量, 不建图层不动图形。(v2.15 的"近垂直切向过滤+相切弧带出+连通分量增益验证"已废)
@@ -172,47 +181,50 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 ## 6. 函数清单
 
+> **本节只记函数名、不记行号**（2026-09-16 定案）：行号每次改脚本就失效（一轮审查下来 84 个行号锚点只剩 14 个还对），
+> 函数名唯一且可检索。定位某个函数：`grep -n "^(defun 函数名" scripts/*.lsp`（注意 `dt:` / `c:` 前缀与脚本家族）。
 
-### 6.1 flb_runner v10.11（101 defun，2659 行）
-- 工具(104-310)：dist/flat->pts/inters-pts/ss->list/ms/layer-vlas/poly-pts/point-on-line/uniq/excluded-p/**curve-p/curves-only(v10.6 非曲线实体过滤)**/norm-angle/in-zone/unit/pt+vec/acos/tan/angle-between/not-parallel/arc-covers/end-infos/set-endpoint/endpoint-in
-- **参数配置与记忆(241-375)**：**dt:flb-cfg-dir(241)**/flb-cfg-kv/flb-cfg-read(distof 校验 INI 解析)/flb-cfg-sec/flb-cfg-get/**flb-param-default(cfg→模板表→caddr 三级)**/flb-cfg-gen(带注释生成 ini)/**flb-mem-save(按模板保存)**/**flb-cfg-boot(375, 文件尾调用: 生成缺失 ini+恢复上次模板/值)**（v10.7 由 `dt:off-cfg-*` 整体更名）
+
+### 6.1 flb_runner v10.11（101 defun，2662 行）
+- 工具：dist/flat->pts/inters-pts/ss->list/ms/layer-vlas/poly-pts/point-on-line/uniq/excluded-p/**curve-p/curves-only(v10.6 非曲线实体过滤)**/norm-angle/in-zone/unit/pt+vec/acos/tan/angle-between/not-parallel/arc-covers/end-infos/set-endpoint/endpoint-in
+- **参数配置与记忆**：**dt:flb-cfg-dir**/flb-cfg-kv/flb-cfg-read(distof 校验 INI 解析)/flb-cfg-sec/flb-cfg-get/**flb-param-default(cfg→模板表→caddr 三级)**/flb-cfg-gen(带注释生成 ini)/**flb-mem-save(按模板保存)**/**flb-cfg-boot(文件尾调用: 生成缺失 ini+恢复上次模板/值)**（v10.7 由 `dt:off-cfg-*` 整体更名）
 - 切割链：cut-params(v10.6 getparamatpoint 剔 nil)/seg-mid/rebuild-seg/cut-curve(统一驱动: nil=打断/TRIM=裁剪)/poly-rebuild/trim-curve/cross-points(**v10.6 包围盒预过滤**: bbox 不相交跳过 intersectwith, 复用 dt:rect-bbox)/trim-all
 - 圆角：fillet-pair(6参)/collect-heads/pair-heads/fillet-all
-- 封口：end-free/pick-pair/close-pair/same-pair/make-close-line/close-channels(1100)
-- 倒角+热咀+假体+主进胶：collect-plate-ends/find-touch/**nozzle-circles(1192)**/add-close-line/mark-fail/chamfer-one(1274)/chamfer-close/near-center-end/extend-ends/fillet-close-one/fillet-close/**dt:flb-process-zjj(2171, v10.8 新增, 扫描 DP 圆心生成 ZJJ 主进胶圆)**
-- 图层偏移：ensure-layer(**1610**, 大小写纠正; v10.11 起已存在图层也校正登记色)/purge-layer/**merge-layer(1649)**/offset-enames/offset-layer(1712)/offset-inward
-- 螺丝：add-screw(**1764** 单圆)/drill-holes(1771)
-- **多模板(v9.8~v10.0)**：**dt:flb-template-table(2017 setq, 通用/矩形, 矩形 process 级覆盖)**/dt:flb-template-row(2060)/dt:flb-apply-template(2067)/dt:flb-template-dcl-lines(2082)/dt:flb-template-dialog(2102)/dt:flb-tpl-keys/**dt:flb-param-labels(2040)**；**dt:rect-bb-pts(2197, boundingbox 的 variant/safearray 双兼容)**/**dt:rect-bbox(2203, 对象列表→包络盒)**/**dt:rect-plate(2219)/dt:rect-jt(2244)/dt:rect-corners(2274)/dt:rect-process(2311)**
-- **假体包络法(v10.2 起)**：**dt:jt-build(1545, FLB 包络盒外扩 hole_dist−offset_dist 圆角矩形, 复用 dt:rect-bbox；v10.2d 起圆角上限与 rect-jt 同为 0.45×短边)**/dt:jt-line(1600)
-- 对话框：dcl-lines(1850, v9.9 按模板动态生成)/write-dcl(1888)/find-dcl/get-num/param-reset/param-apply/param-dialog(1950)/c:FLBPARAM(1995)/c:PARAM(兼容别名)
-- **c:FLB(2417，含局部 `*error*`) / c:OFF(2416 兼容别名)**
+- 封口：end-free/pick-pair/close-pair/same-pair/make-close-line/close-channels
+- 倒角+热咀+假体+主进胶：collect-plate-ends/find-touch/**nozzle-circles**/add-close-line/mark-fail/chamfer-one/chamfer-close/near-center-end/extend-ends/fillet-close-one/fillet-close/**dt:flb-process-zjj(v10.8 新增, 扫描 DP 圆心生成 ZJJ 主进胶圆)**
+- 图层偏移：ensure-layer(大小写纠正; v10.11 起已存在图层也校正登记色)/purge-layer/**merge-layer**/offset-enames/offset-layer/offset-inward
+- 螺丝：add-screw(单圆)/drill-holes
+- **多模板(v9.8~v10.0)**：**dt:flb-template-table(setq 表, 通用/矩形, 矩形 process 级覆盖)**/dt:flb-template-row/dt:flb-apply-template/dt:flb-template-dcl-lines/dt:flb-template-dialog/dt:flb-tpl-keys/**dt:flb-param-labels**；**dt:rect-bb-pts(boundingbox 的 variant/safearray 双兼容)**/**dt:rect-bbox(对象列表→包络盒)**/**dt:rect-plate/dt:rect-jt/dt:rect-corners/dt:rect-process**
+- **假体包络法(v10.2 起)**：**dt:jt-build(FLB 包络盒外扩 hole_dist−offset_dist 圆角矩形, 复用 dt:rect-bbox；v10.2d 起圆角上限与 rect-jt 同为 0.45×短边)**/dt:jt-line
+- 对话框：dcl-lines(v9.9 按模板动态生成)/write-dcl/find-dcl/get-num/param-reset/param-apply/param-dialog/c:FLBPARAM/c:PARAM(兼容别名)
+- **c:FLB(含局部 `*error*`) / c:OFF(兼容别名)**
 
-### 6.2 cx_runner v11.8（81 defun，1940 行）
-- **参数配置与记忆(v10.1, 36-195)**：cx-cfg-dir/kv/read(v10.3 句柄兜底关闭)/sec/get/**cx-param-default**/cx-cfg-gen/**cx-mem-save**/**cx-cfg-boot**(文件尾)；全局 \*dt-cx-cfg\*/\*dt-cx-mem\*（固定节"参数"）
-- **撤销(v11.x)**：**cx-undo-mark(304)/cx-undo-end(309)**（COM 撤销标记, 坑 #69 全文件零 `(command)`）
+### 6.2 cx_runner v11.9（81 defun，1948 行）
+- **参数配置与记忆(v10.1)**：cx-cfg-dir/kv/read(v10.3 句柄兜底关闭)/sec/get/**cx-param-default**/cx-cfg-gen/**cx-mem-save**/**cx-cfg-boot**(文件尾)；全局 \*dt-cx-cfg\*/\*dt-cx-mem\*（固定节"参数"）
+- **撤销(v11.x)**：**cx-undo-mark/cx-undo-end**（COM 撤销标记, 坑 #69 全文件零 `(command)`）
 - 工具+切割链+圆角+偏移：与主脚本逐字一致的公共库（dist/flat->pts/inters-pts/ss->list/ms/layer-vlas/poly-pts/point-on-line/uniq/excluded-p/curve-p/curves-only/norm-angle/in-zone/unit/pt+vec/acos/tan/angle-between/not-parallel/end-infos/set-endpoint/endpoint-in/cut-params/seg-mid/rebuild-seg/cut-curve/poly-rebuild/trim-curve/rect-bb-pts/rect-bbox/bbox-overlap-p/cross-points）+ offset-enames；**fillet-pair = dt:cx-fillet-pair(缺省层 "CX"/本脚本小圆角, 消除跨脚本隐藏耦合, 坑 #46)**
-- 出线槽链：collect-ends/break-curve/**cx-trim(961)**/cx-fillet-all(995)/cx-first-cross(1035)/cx-extend-fixed(1073)/**cx-join(1120)**/near-src-fwd/**cx-close(1264)**/**cx-cxk(1332)**/**cx-process(1387)**
-- **压线板链(v10.5~v11.8, 1461-1725)**：**yxb-tpl(1461, D 形模板 6 件)**/yxb-map-pt(1472)/**yxb-draw(1477, 本地系 +X→外法向 +Y→壁向; v11.7 镜像系弧角区间反向修左壁畸形)**/**yxb-resolve-side(1517, v11.7 内壁(I)/外壁(O) 按相连源线投票整圈一致取侧)**/yxb-plan(1565)/**yxb-place(1621)**/yxb-pt-line-dist(1678)/**yxb-segs-of(1689, v11.3 多段线逐段拆壁, 弧段跳过并计数)**/**yxb-find-walls(1725)**
-- 对话框：cx-dcl-lines/cx-write-dcl/cx-find-dcl/get-num/cx-param-reset/apply/dialog/c:CXPARAM；**c:CX(1911，含局部 `*error*`；c:SLOT 为兼容别名)**
+- 出线槽链：collect-ends/break-curve/**cx-trim**/cx-fillet-all/cx-first-cross/cx-extend-fixed/**cx-join**/near-src-fwd/**cx-close**/**cx-cxk**/**cx-process**
+- **压线板链(v10.5~v11.8)**：**yxb-tpl(D 形模板 6 件)**/yxb-map-pt/**yxb-draw(本地系 +X→外法向 +Y→壁向; v11.7 镜像系弧角区间反向修左壁畸形)**/**yxb-resolve-side(v11.7 内壁(I)/外壁(O) 按相连源线投票整圈一致取侧)**/yxb-plan/**yxb-place**/yxb-pt-line-dist/**yxb-segs-of(v11.3 多段线逐段拆壁, 弧段跳过并计数)**/**yxb-find-walls**
+- 对话框：cx-dcl-lines/cx-write-dcl/cx-find-dcl/get-num/cx-param-reset/apply/dialog/c:CXPARAM；**c:CX(含局部 `*error*`；c:SLOT 为兼容别名)**
 
-### 6.3 jrt_runner v9.36（119 defun，3121 行）
-- **参数配置与记忆(v9.13, 117-271)**：jrt-cfg-dir/kv/read/sec/get/**jrt-param-default**/jrt-cfg-gen/**jrt-mem-save**/**jrt-cfg-boot**(文件尾)；全局 \*jrt-cfg\*/\*jrt-mem\*；**撤销 = dt:jrt-undo-mark/-end（坑 #69, 全文件零 `(command)`）**
+### 6.3 jrt_runner v9.36（119 defun，3122 行）
+- **参数配置与记忆(v9.13)**：jrt-cfg-dir/kv/read/sec/get/**jrt-param-default**/jrt-cfg-gen/**jrt-mem-save**/**jrt-cfg-boot**(文件尾)；全局 \*jrt-cfg\*/\*jrt-mem\*；**撤销 = dt:jrt-undo-mark/-end（坑 #69, 全文件零 `(command)`）**
 - 工具+切割链+圆角+图层偏移：公共库保留原名；**fillet-pair/cut-curve/trim-curve 改名 dt:jrt-\***（坑 #46）
-- 加热条链（通用一）：jrt-snapshot/jrt-diff(eName 快照差集)/jrt-sample-pts/jrt-curve-dist/jrt-touch-p/jrt-free-ends/jrt-match-rz/**jrt-decide(端帽判定,1242)**/jrt-head-walls/jrt-cap-circle/**jrt-cap-line(1329)**/jrt-trim/jrt-fillet/jrt-zero-clean/jrt-template-row/jrt-stage/**jrt-build(1503)**
-- **通用二链（v9.16~v9.36）**：jrt2-grp-touch/jrt2-group/jrt2-cands/jrt2-min-dist/jrt2-pick-near/jrt2-curve-edges/**jrt2-region-edges-n(1642)/jrt2-region-edges(1656)/jrt2-pt-inside(1661, 射线奇偶点内)/jrt2-pick-side(1698)/jrt2-propagate(1751, 整环传播 RingA/RingB)/jrt2-flb-score(1735, 到 FLB 壁平均最近距离裁决内偏方向)/jrt2-layer(1800)**/**jrt2-close(1898, 破口封闭线; v9.36 层名参数化, 调用点传 "JRT")**/**jrt2-trace(1943, v9.36 新增: 在 JRTFBX 描同几何定位副本)**/jrt2-offset-line/**jrt2-line-extend(1995, v9.26 圆弧壁够不着时双端加长)**/jrt2-ch-exist/jrt2-line-x-curve/jrt2-wall-tan/jrt2-near-pt/jrt2-osculating/jrt2-true-fillet/jrt2-hook-arc(2179)/**jrt2-hook-one(2254, 出线口 S 形开口)**/jrt2-trim-line/jrt2-seg-rebuild/jrt2-hooks(2391)/**jrt2-process(2397, 通用二全覆盖)**/jrt2-fillet2/jrt2-junction(2573)/**jrt2-neck(2638, 颈线按 FLB 围合区奇偶判外)**
-- 对话框：jrt-dcl-lines/jrt-template-dcl-lines/jrt-write-dcl/**jrt-find-dcl(v9.11b 确定性模式)**/jrt-get-num/jrt-param-reset/apply/dialog/jrt-apply-template/jrt-template-dialog/c:JRTPARAM(3021)；**c:JRT(3035，含局部 `*error*`)**
+- 加热条链（通用一）：jrt-snapshot/jrt-diff(eName 快照差集)/jrt-sample-pts/jrt-curve-dist/jrt-touch-p/jrt-free-ends/jrt-match-rz/**jrt-decide(端帽判定,1242)**/jrt-head-walls/jrt-cap-circle/**jrt-cap-line**/jrt-trim/jrt-fillet/jrt-zero-clean/jrt-template-row/jrt-stage/**jrt-build**
+- **通用二链（v9.16~v9.36）**：jrt2-grp-touch/jrt2-group/jrt2-cands/jrt2-min-dist/jrt2-pick-near/jrt2-curve-edges/**jrt2-region-edges-n/jrt2-region-edges/jrt2-pt-inside(射线奇偶点内)/jrt2-pick-side/jrt2-propagate(整环传播 RingA/RingB)/jrt2-flb-score(到 FLB 壁平均最近距离裁决内偏方向)/jrt2-layer**/**jrt2-close(破口封闭线; v9.36 层名参数化, 调用点传 "JRT")**/**jrt2-trace(v9.36 新增: 在 JRTFBX 描同几何定位副本)**/jrt2-offset-line/**jrt2-line-extend(v9.26 圆弧壁够不着时双端加长)**/jrt2-ch-exist/jrt2-line-x-curve/jrt2-wall-tan/jrt2-near-pt/jrt2-osculating/jrt2-true-fillet/jrt2-hook-arc/**jrt2-hook-one(出线口 S 形开口)**/jrt2-trim-line/jrt2-seg-rebuild/jrt2-hooks/**jrt2-process(通用二全覆盖)**/jrt2-fillet2/jrt2-junction/**jrt2-neck(颈线按 FLB 围合区奇偶判外)**
+- 对话框：jrt-dcl-lines/jrt-template-dcl-lines/jrt-write-dcl/**jrt-find-dcl(v9.11b 确定性模式)**/jrt-get-num/jrt-param-reset/apply/dialog/jrt-apply-template/jrt-template-dialog/c:JRTPARAM；**c:JRT(含局部 `*error*`)**
 
-### 6.4 wx_runner v2.17（73 defun（含 5 个局部 `*error*` 与 stringp 垫片），2419 行，外协加工与尺寸测量工具箱）
+### 6.4 wx_runner v2.18（75 defun（含 6 个局部 `*error*` 与 stringp 垫片），2488 行，外协加工与尺寸测量工具箱）
 - 自包含基础几何库：dt:ms/dt:ss->list/dt:ensure-layer/dt:rect-bb-pts/dt:rect-bbox/dt:sz-curve-p/dt:sz-curves-only/stringp(兼容垫片)
 - 倾角探测与摆正：dt:sz-detect-tilt-angle(优先探测 FLB 主斜角)/dt:sz-straighten-objs(绕基准旋转正交摆正)
 - 测量核心引擎：dt:sz-copy-clip(ActiveX+clip.exe双通道)/dt:sz-curve-sample-pts/dt:sz-curve-angle/dt:sz-uniq-angles/dt:sz-rot-pt/dt:sz-check-closed(双引擎: ACIS Region + 端点0.5mm拓扑度数)/dt:sz-calc-box(AABB+OBB最佳包络)/dt:sz-fmt-num/dt:sz-draw-box-dim(FLB_BOX 字高15)
-- **加热条长度测量引擎(v2.16, §二.5 行 680 起)**：dt:sz-jrt-curve-len/dt:sz-jrt-ends(整圆/闭合pline视为无端点)/dt:sz-jrt-min-dist(双向5采样投影)/dt:sz-jrt-obj-bbox/dt:sz-jrt-bb-gap/dt:sz-jrt-strips(15mm 归堆分条)/dt:sz-jrt-fbx-match(JRTFBX 副本两端点无序重合精确剔除)/dt:sz-jrt-adj-p(相接判定: 端点重合+端点贴"无端点曲线"线身——通用一圆帽整圆切点)/dt:sz-jrt-comps-i(下标连通分量, 按邻接表传播)/dt:sz-jrt-lens-at(给定剔除表算各线链长)/dt:sz-jrt-spread(线链整齐度=相对中间值极差, 单链=1)/dt:sz-jrt-joined-p(候选资格: 直线两头都接别的曲线端点)/dt:sz-jrt-close-pick(几何复核=生成规则反推: 单根/成对试剔, 剔后线链几乎等长才确认; 成对只试最短12根)/dt:sz-jrt-nearmiss(端点间距0.01~2mm断口)/dt:sz-jrt-chain-closed-p/dt:sz-jrt-median/dt:sz-jrt-strip-rec(模型+剔除+测量记录)/dt:sz-jrt-report(完整性守卫+各层明细+结果输出)
-- 外协导出引擎：dt:sz-format-multiline(长连文件名智能 \P 换行)/dt:sz-get-font-face/dt:sz-ensure-style/dt:sz-ensure-doc-layer/dt:sz-flatten-layer/dt:sz-migrate-layers(精雕并入 JD 层)/dt:sz-find-open-doc/**dt:sz-doc-ms-bbox(970, v2.13 增可选 excl-layers 求"内容"外包盒)**/**dt:sz-doc-texts(941, v2.14 只取「外协文字」插入点——非活动文档的 MText boundingbox 不可靠)**/dt:sz-collect-auto-curves(1018, 白名单 FLB/LS/RZ/DK/JRT/DP/ZJJ)/dt:sz-mirror-in-curdoc(1040, 活动文档任意轴镜像, 正反面间隔 75mm)/**dt:sz-row-right(1000, v2.13 由几何反推本行单元盒右缘)**/**dt:sz-make-title(1068, v2.13 统一规格幅标题 MText)**/dt:sz-export-to-dwg(1087, 跨文档原子克隆 + 单元盒网格排版 + 标题随件拷入)
+- **加热条长度测量引擎(v2.16, §二.5 起)**：dt:sz-jrt-curve-len/dt:sz-jrt-ends(整圆/闭合pline视为无端点)/dt:sz-jrt-min-dist(双向5采样投影)/dt:sz-jrt-obj-bbox/dt:sz-jrt-bb-gap/dt:sz-jrt-strips(15mm 归堆分条)/dt:sz-jrt-fbx-match(JRTFBX 副本两端点无序重合精确剔除)/dt:sz-jrt-adj-p(相接判定: 端点重合+端点贴"无端点曲线"线身——通用一圆帽整圆切点)/dt:sz-jrt-comps-i(下标连通分量, 按邻接表传播)/dt:sz-jrt-lens-at(给定剔除表算各线链长)/dt:sz-jrt-spread(线链整齐度=相对中间值极差, 单链=1)/dt:sz-jrt-joined-p(候选资格: 直线两头都接别的曲线端点)/dt:sz-jrt-close-pick(几何复核=生成规则反推: 单根/成对试剔, 剔后线链几乎等长才确认; 成对只试最短12根)/dt:sz-jrt-nearmiss(端点间距0.01~2mm断口)/dt:sz-jrt-chain-closed-p/dt:sz-jrt-median/dt:sz-jrt-strip-rec(模型+剔除+测量记录)/dt:sz-jrt-report(完整性守卫+各层明细+结果输出)
+- 外协导出引擎：dt:sz-format-multiline(长连文件名智能 \P 换行)/dt:sz-get-font-face/dt:sz-ensure-style/dt:sz-ensure-doc-layer/dt:sz-flatten-layer/dt:sz-migrate-layers(精雕并入 JD 层)/dt:sz-find-open-doc/**dt:sz-doc-ms-bbox(v2.13 增可选 excl-layers 求"内容"外包盒)**/**dt:sz-doc-texts(v2.14 只取「外协文字」插入点——非活动文档的 MText boundingbox 不可靠)**/dt:sz-collect-auto-curves(白名单 FLB/LS/RZ/DK/JRT/DP/ZJJ)/dt:sz-mirror-in-curdoc(活动文档任意轴镜像, 正反面间隔 75mm)/**dt:sz-row-right(v2.13 由几何反推本行单元盒右缘)**/**dt:sz-make-title(v2.13 统一规格幅标题 MText)**/dt:sz-export-to-dwg(跨文档原子克隆 + 单元盒网格排版 + 标题随件拷入)
 - 配置与路径：dt:sz-gets/dt:sz-get-date-str/dt:sz-split/dt:sz-mkdir-p/dt:sz-cfg-get/dt:sz-get-latest-target/dt:sz-next-avail-name/dt:sz-auto-target-path
-- 命令接口：c:FLBSZ(1899) / c:FLBSIZE / c:SZ / c:WXSZ(均转 FLBSZ) / c:JRTSZ(2016) / c:XQG(2111) / c:JD(2159) / c:SJTZ(2185)
+- 命令接口：c:FLBSZ / c:FLBSIZE / c:SZ / c:WXSZ(均转 FLBSZ) / c:JRTSZ / c:XQG / c:JD / c:SJTZ
 - **v2.14 排版基准铁律**：行判定/行内容顶取「外协文字」**插入点**（属性直读，= 文字底边 = 内容顶 + text_gap），行右缘/内容底缘取**内容实体 bbox**（排除 外协文字/外协包络盒）——禁止再读 MText 的 boundingbox（非活动文档不可靠，v2.13 实测把行顶算低 86mm 导致 Y 乱飘且永不换行）；回归 `check_audit_fixes.py` B-12 硬断言文件内不得再出现 MText bbox 读取
 
-### 6.5 dt_start v3.4（31 defun，804 行；v3.4: 外协加工子菜单 +「测量加热条长度(JRTSZ)」+ about 清单同步）
+### 6.5 dt_start v3.6（31 defun，814 行；v3.4 外协加工子菜单 +「测量加热条长度(JRTSZ)」+ about 清单同步；v3.5 外协加工三级序重排；v3.6 体检修复 `c:DTDEMO` 死分支）
 - **低版本兼容底座(v2.9 新增, 坑 #65)**：**st-gets(取系统变量, 抛错/nil/非字符串一律返回 "")**/**st-hasvar(变量是否存在)**/**st-support-root(ROAMABLEROOTPREFIX→LOCALROOTPREFIX→"" 兜底)** —— 全文件所有 getvar 必须经这三个函数, 禁止裸调 getvar(check_sysvars.py 门禁)
 - 引导：st-families(**五元组**: 前缀/中文名/主命令/参数命令/子菜单热键, 加载与菜单共用)/st-init(\*dt-script-dir\* 注入+propagate)/**st-locate(findfile→dwgprefix(走 st-gets)→getfiled 兜底)**/st-digits/st-vernum(纪元感知)/st-pick(正式版优先)/st-join/st-boot(会话守卫, 加载成功后自动挂菜单)
 - 钩子+路径：**st-acadoc-path(收 dir 参数; 支持根不可用→兜底写脚本目录)**/st-2bs/st-write-hook(标记块幂等; 支持根可用才 vl-mkdir 且包 catch)/**st-remove-hook(收 dir 参数)**/st-path-list/**st-split(入参 null 直接返回 nil)**/**st-add-support(收 front 参数: 兜底模式须把脚本目录顶到支持路径最前)**/st-del-support/**st-trusted-add/del(v2.9 起补 null + 非字符串判断: 老版本无此变量即跳过, 不再把 nil 喂给 st-path-list)**
@@ -222,15 +234,15 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 
 ## 7. 核心算法要点（增量）
 
-- **热咀+点孔（`dt:nozzle-circles`，1192 行）**：每条封口线=一个封闭通道端头；圆心=封口线中点+垂直于封口线、指向通道内侧×nozzle_offset(40)；内侧方向由相连分流板线中点相对封口线中点的点积判号。热咀圆→RZ，同心点孔圆→DK(pin_r=0 不画)。**必须在倒角前**调用。
-- **并层（`dt:merge-layer`，1649 行）**：移全部对象到目标层→删空层定义(失败静默)。FBX→FLB(第9.5步)、JTFBX→JT(第15.5步)。
-- **出线槽收头+大圆角（`dt:cx-join`，1120 行）**：Pass1a 在未收头几何上逐条求延长向第一交点(实际交点过滤"沿方向且≤延长长+1"，无交点兜底端头贴壁≤0.5)→Pass1b 统一 set-endpoint 收至交点(命中)/复原(未命中)→Pass2 逐交点(去重)：≥2 重合端头→`fillet-pair ... T`(**与小圆角同公式仅 R 换大，nochk=T 关闭区域方向验证**——延长接头处两源线区域不重叠，区域检查会误拒正确方向，v9.3/v9.4 方向错的根源)；仅 1 端头(T形)→打断宿主壁、取主体方向与宿主源线前进方向同侧的断头配对。
-- **敞口封闭（`dt:cx-close`，1264 行）**：v10.1 起去重改为双向比较(反向命中不再画重复封闭线)。：源线悬空端的壁端头距源线端点恰 17.5(窗口±15%)且悬空(end-free)→两不同对象端头连线。接头处壁端头已被移动(实测距≥22)天然排除。**端点记录必须用 collect-ends 的 (坐标 对象 端类型) 格式**（坑 #31）。
-- **CXK 分流（`dt:cx-cxk`，1332 行，v9.9）**：每条封闭线 3 采样点(起/中/终)到各 DP 对象最近点(getclosestpointto)求最小=该线 DP 距离；取最大者(并列取先)移入 CXK(青绿 122，内联创建)。DP 空则提示跳过(全部留 CX)；1 条封闭线时它即最远仍移入。与封闭同 UNDO 组。
+- **热咀+点孔（`dt:nozzle-circles`）**：每条封口线=一个封闭通道端头；圆心=封口线中点+垂直于封口线、指向通道内侧×nozzle_offset(40)；内侧方向由相连分流板线中点相对封口线中点的点积判号。热咀圆→RZ，同心点孔圆→DK(pin_r=0 不画)。**必须在倒角前**调用。
+- **并层（`dt:merge-layer`）**：移全部对象到目标层→删空层定义(失败静默)。FBX→FLB(第9.5步)、JTFBX→JT(第15.5步)。
+- **出线槽收头+大圆角（`dt:cx-join`）**：Pass1a 在未收头几何上逐条求延长向第一交点(实际交点过滤"沿方向且≤延长长+1"，无交点兜底端头贴壁≤0.5)→Pass1b 统一 set-endpoint 收至交点(命中)/复原(未命中)→Pass2 逐交点(去重)：≥2 重合端头→`fillet-pair ... T`(**与小圆角同公式仅 R 换大，nochk=T 关闭区域方向验证**——延长接头处两源线区域不重叠，区域检查会误拒正确方向，v9.3/v9.4 方向错的根源)；仅 1 端头(T形)→打断宿主壁、取主体方向与宿主源线前进方向同侧的断头配对。
+- **敞口封闭（`dt:cx-close`）**：v10.1 起去重改为双向比较(反向命中不再画重复封闭线)。：源线悬空端的壁端头距源线端点恰 17.5(窗口±15%)且悬空(end-free)→两不同对象端头连线。接头处壁端头已被移动(实测距≥22)天然排除。**端点记录必须用 collect-ends 的 (坐标 对象 端类型) 格式**（坑 #31）。
+- **CXK 分流（`dt:cx-cxk`，v9.9）**：每条封闭线 3 采样点(起/中/终)到各 DP 对象最近点(getclosestpointto)求最小=该线 DP 距离；取最大者(并列取先)移入 CXK(青绿 122，内联创建)。DP 空则提示跳过(全部留 CX)；1 条封闭线时它即最远仍移入。与封闭同 UNDO 组。
 - **加热条端帽判定（`dt:jrt-decide`）**：自由端头按 `gap = 本LD线与不相交LD线最小轴线距 − 2×jrt_offset` 判定：|gap−jrt_offset|≤1 且 RZ 匹配 → 圆帽；否则直线帽。端帽形式各层共用。RZ 匹配=圆心落在 LD 线上(垂距<0.5)且离本端点近；inward=端点→RZ圆心(无 RZ 时=端点→另一端点)。
 - **加热条多层隔离（`dt:jrt-snapshot`/`dt:jrt-diff`）**：每层构建用 JRT 层 eName 快照+差集跟踪本层产物，裁剪/圆角/端帽只作用于本层实体。裁剪会删除重建对象，故每步后重新差集刷新。
-- **矩形模板（`dt:rect-process`，flb v9.8~v10.0，2311 行）**：LD 包围盒四边向外扩 offset_dist 画矩形板边(rect-bb-pts 兼容 boundingbox 输出参数的 variant/safearray 两种绑定)→四角 rect_chamfer(默认10) 倒角→圆角矩形假体(外扩 hole_dist, fillet_r_hole)→热咀(预画 RZ 优先, 否则流道拐点兜底)→螺丝(预画 LS 优先, 否则左右板边中点向内 screw_in=15 兜底)→建 13 层/清理/统计自管全流程→**画完删 LD 源线**(与画图同一 UNDO 组, 一次 Ctrl+Z 找回)。process 级覆盖=整个流程由该模板函数自管, 不走内置流程。通用模板行为零变化。
-- **假体包络法（`dt:jt-build`(1545)+`dt:jt-line`(1600)，flb v10.2~v10.2d）**：JT = **FLB 包络盒外扩 (hole-dist − offset-dist) 的圆角矩形**，四角 R=fillet_r_hole（圆角过大自动让位为直角）。替代旧五步启发式（LD偏移50→带状裁剪→断口圆角→延长→端点封口→封口圆角）。**旧法死因**（工字形实测, 通道间距 70≤D<100）：相向 JT 线互相落入对方 ±50 带区且平行无交点 → cut-curve "整线在区域内"分支整线删除；封口只认"LD 端点 ±50±tol"的端头, 组间断裂无法配对 → JT 碎裂。包络法手画答案逐点验证（flb_1.dxf：四边=FLB包络±15, 四角弧圆心=未倒角原角点）；内部通道（不达板边, 如工字形竖流道）由毛坯盘直接桥过。FLB 为空/外扩量 ≤1 时回退旧五步（旧函数全部保留, hole_extend 仅旧路径使用）。**v10.2b/c 三连修**：包络盒改用 dt:rect-bbox（内联 vla-getboundingbox 漏传引用参数恒失败→误回退, 坑 #56）；四角弧补 put-layer + **象限修正**（BR=270°→360°/TR=0°→90°/TL=90°→180°/BL=180°→270°, 此前每角画成隔壁角的弧与四边不接）；倒角计数 bug 修复（坑 #57）。**v10.2d**：四角圆角上限由"边长−1"改为与 rect-jt 同款的 0.45×短边（细长包络盒上四角弧会互相重叠）。
+- **矩形模板（`dt:rect-process`，flb v9.8~v10.0）**：LD 包围盒四边向外扩 offset_dist 画矩形板边(rect-bb-pts 兼容 boundingbox 输出参数的 variant/safearray 两种绑定)→四角 rect_chamfer(默认10) 倒角→圆角矩形假体(外扩 hole_dist, fillet_r_hole)→热咀(预画 RZ 优先, 否则流道拐点兜底)→螺丝(预画 LS 优先, 否则左右板边中点向内 screw_in=15 兜底)→建 13 层/清理/统计自管全流程→**画完删 LD 源线**(与画图同一 UNDO 组, 一次 Ctrl+Z 找回)。process 级覆盖=整个流程由该模板函数自管, 不走内置流程。通用模板行为零变化。
+- **假体包络法（`dt:jt-build`+`dt:jt-line`，flb v10.2~v10.2d）**：JT = **FLB 包络盒外扩 (hole-dist − offset-dist) 的圆角矩形**，四角 R=fillet_r_hole（圆角过大自动让位为直角）。替代旧五步启发式（LD偏移50→带状裁剪→断口圆角→延长→端点封口→封口圆角）。**旧法死因**（工字形实测, 通道间距 70≤D<100）：相向 JT 线互相落入对方 ±50 带区且平行无交点 → cut-curve "整线在区域内"分支整线删除；封口只认"LD 端点 ±50±tol"的端头, 组间断裂无法配对 → JT 碎裂。包络法手画答案逐点验证（flb_1.dxf：四边=FLB包络±15, 四角弧圆心=未倒角原角点）；内部通道（不达板边, 如工字形竖流道）由毛坯盘直接桥过。FLB 为空/外扩量 ≤1 时回退旧五步（旧函数全部保留, hole_extend 仅旧路径使用）。**v10.2b/c 三连修**：包络盒改用 dt:rect-bbox（内联 vla-getboundingbox 漏传引用参数恒失败→误回退, 坑 #56）；四角弧补 put-layer + **象限修正**（BR=270°→360°/TR=0°→90°/TL=90°→180°/BL=180°→270°, 此前每角画成隔壁角的弧与四边不接）；倒角计数 bug 修复（坑 #57）。**v10.2d**：四角圆角上限由"边长−1"改为与 rect-jt 同款的 0.45×短边（细长包络盒上四角弧会互相重叠）。
 - 其余算法(偏移/裁剪/圆角几何/封口配对/螺丝 ref/假体延长)同 v8.16 一脉相承，详见历史备份文件内注释。
 
 ## 8. 关键数据结构（三套端点格式，勿混用！）
@@ -244,96 +256,11 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 | 命中记录 hits | `(对象 端类型 交点 宿主壁)` | slot-join 内部 |
 
 
-## 9. 版本历史（v9.0 起；v1.0→v8.16 见 `offset_runner_v816.lsp` 文件头）
+## 9. 版本历史
 
-| 脚本 | 版本 | 变更 |
-|---|---|---|
-| offset | v9.0 | 出线槽拆分为独立 slot_runner；删 6 死函数+去重重构+精简注释（整理自 v8.16，逻辑零变化） |
-| offset | v9.1 | 封口线收尾并层(FBX→FLB、JTFBX→JT 并删层)；"分流板挖孔"全部更名"分流板假体" |
-| offset | v9.2 | 新增热咀圆(参数 nozzle_offset 40/nozzle_r 11.35，定位=封口线中点向内) |
-| offset | v9.3 | 新增同心点孔圆(pin_r 3，设0不画) |
-| offset | v9.4 | **图层全部拼音化**(LD/FLB/FBX/LS/JT/JTFBX/RZ/CX)；热咀与点孔拆为 RZ/DK 两层；新建 DP 垫片预留层 |
-| offset | v9.5 | 参数框分组 RZ→"热咀和点孔"(中文)；ensure-layer 自动纠正图层大小写(dp→DP) |
-| offset | v9.6 | 螺丝孔双同心圆(R4.25+R7)合并为单圆，参数单化 screw_r |
-| offset | v9.8(a) | 多模板框架：通用/矩形模板(dt:off-template-table，矩形 process 级覆盖 dt:rect-process 自管全流程)+板角倒角参数；a 修 boundingbox 的 variant/safearray 绑定差异 |
-| offset | v9.9 | 参数框按模板动态显示（同 jrt v9.9 模式） |
-| offset | v10.0 | 矩形模板完善：螺丝内偏默认15(通用保持10)；画完自动删 LD 源线(与画图同撤销组) |
-| offset | v10.1 | **参数默认值外置 offset_runner.ini**(按模板分节, 弹框前重读=随时生效)；参数记忆 offset_runner_mem.ini(按模板各一套, 确定自动保存, 上次模板+上次值跨会话恢复)；恢复默认 = ini 默认值 |
-| offset | v10.2 | **假体重构为包络法**：JT = FLB 包络盒外扩(hole_dist−offset_dist)圆角矩形，四角 R=fillet_r_hole；修复工字形(通道间距 70≤D<100)旧五步 JT 互删碎裂(手画 flb_1.dxf 逐点验证)；链环/接合清理中间方案(约 270 行)被包络法替代删除；旧五步保留为回退路径 |
-| offset | v10.2b/c | 修复实测三连：包络盒改用 dt:rect-bbox(引用参数漏传恒失败→误回退)；封口/端点收集跳过文字对象(圆角标注文字致 AcDbText 崩溃)；四角弧补图层+象限修正(每角画成隔壁角弧)；倒角计数陈年 bug(v6.0 起, 每封口线虚报 1 失败, 4 封口线恒报"失败 4 端"而几何全成功, flb_3 实测)统一为 (成功数,失败数) 并补 find-touch 失败分支标注 |
-| offset | v10.4 | 包络法改分步绘制(步骤1 原始包络盒/步骤2 成品, 双撤销组观察)；c:OFF 恢复调用包络法(期间曾按用户要求短暂直跑传统五步) |
-| 全部 | **发版 2026-08-30** | test\ 迁移至 CAD\ 根并删除 test\（4 .lsp + 3 ini + _audit.py 迁移; mem/dcl/old 不迁; acaddoc.lsp 钩子改指 CAD\）; 三个 ini 重写为逐参数中文注释版(GBK, 现值不变); README_CAD 重写为操作手册 |
-| offset | **v10.2d** | **全面审查定稿**: ①参数框数值 atof→distof(垃圾输入不再静默当 0, 坑#54/#60); ②INI 中文节名解析改用"截到行尾再裁方括号"(修复 2021 前 strlen 字节/substr 字符不一致导致节名残留 "]"、配置节永远匹配不上, 坑#59); ③mem 文件不再重复写出第二个 [模板] 节(坑#62); ④补声明全部遗漏的 foreach/setq 局部(no/cl/seg/pt/obj/ln/p/…, 坑#61); ⑤闭合多段线判定补 vl-catch-all-error-p; ⑥假体包络矩形圆角上限改 0.45×短边; ⑦删死函数 dt:fix-layer-case 与未使用局部; ⑧修横幅版本号(v10.2→实际 v10.2c)与陈旧 slot_runner_v90.lsp 引用 |
-| offset | **v10.5** | **假体改人工决策**：参数框新增勾选框「假体用包络法」(默认不勾=传统逐步直跑)；默认值外置 ini [假体] envelope(旧 ini 自动追加该节, 不动用户已改值)；确定才记忆(mem [假体] 节), 恢复默认=ini 值；勾选但包络失败不静默回退(明确提示无假体)；dt:jt-build 撤分步观察恢复单撤销组 |
-| offset | **v10.6** | **健壮性修复(几何零变化)**: ①非曲线实体防护补全 —— 新增 dt:curve-p/dt:curves-only, LD 源图层混入文字/块时 close-channels/extend-ends 不再崩, FBX/JTFBX 上的历史失败标注文字不再使 chamfer-close/fillet-close/drill-holes 独立重跑崩溃, collect-heads/trim-all/fillet-all 同步过滤(v10.2b 只修了封口侧, 本次补全); ②cut-params 多段线分支 getparamatpoint 包 catch+剔 nil 再排序(nil 进 vl-sort 报错); ③对话框 load_dialog/start_dialog 包 catch 且保证 unload_dialog; ini 句柄异常兜底关闭(含 boot 的 [假体]节追加写); ④c:OFF 的 *error* 兜底闭合 UNDO 组; ⑤参数应用负值回退当前值; ⑥cross-points 包围盒预过滤(bbox 不相交跳过 COM 求交, 大图提速, 结果不变) |
-| slot | v9.0 | 自 offset_runner 独立(逻辑零改动)，命令 SLOT/SLOTPARAM，CX 源线+壁同层 |
-| slot | v9.1 | 图层"出线槽"→CX |
-| slot | v9.2 | 参数框分组标题→"基本设置" |
-| slot | v9.3 | 大圆角重构：延长收头到第一交点(修复 v8.15"冲过头") + 交点配对圆角 |
-| slot | v9.4 | 尝试"前进方向张角外角侧"定位(方向仍错，废弃) |
-| slot | v9.5 | **方向定案**：大圆角=小圆角同款 fillet-pair 仅换 R30，nochk=T(用户实测确认) |
-| slot | v9.6 | 新增敞口封闭线(3 处验证)+ 完成后删除全部源线 |
-| slot | v9.7 | 修复 slot-close 端点格式错误(ends vs heads，弧对象当点崩溃) |
-| slot | v9.8 | **dt:write-dcl 改名 dt:slot-write-dcl**：与主脚本同名不同体，三脚本同加载互相覆盖致对话框错乱(坑 #46) |
-| slot | v9.9 | 新增 CXK：距 DP 最远的封闭线自动移入 CXK 层(蓝5)，DP 空则跳过 |
-| slot | v10.0 | **参数默认值外置 slot_runner.ini**(固定节[参数]) + 参数记忆(确定自动保存, 跨会话预填)；恢复默认 = ini 默认值 |
-| slot | v10.2 | **大小圆角自动适配**(用户要求): fillet-pair 重构为"每候选半径同时过线长+方向两关"统一递减(>2 步长1/≤2 步长0.5/下限0.5) —— 旧版两关分开, 小圆角方向全堵即失败不试小半径; 自动适配成功标 "R<n>自动", 递减到底仍失败标 "圆角失败"文字(小圆角/大圆角/T形三分支); CX 层标注文字类型防护(slot-curve-p 过滤 collect-heads/collect-ends/延长); slot-join Pass2 整体重写(修多轮修补遗留括号错位 "no function definition: nil" 崩溃)+单接合 vl-catch-all 诊断(意外错误降级为标注继续) | **←已整体回退, 用户实测同板恢复大圆角 4 处成功(R120)**。0/0 的真因不是判定规则, 是重建版 slot-join 括号"全局配平但嵌套错位"(闭合提前吃掉 cond/lambda/foreach, 转角与 T 形分支成死代码, 圆角逻辑从未执行且不崩溃不报错, 表面就是安静 0/0) —— 判定逻辑 v10.1 与重建版逐字一致, 差异纯在结构(坑 #44 二次事故)
-| slot | **v10.1** | **全面审查定稿**(与 offset v10.2d 同期): ①atof→distof; ②INI 节名解析修复(坑#59); ③补声明遗漏局部; ④闭合多段线判定补错误检查; ⑤敞口封闭去重改双向比较(反向命中不再画重复封闭线); ⑥延长收头存活检查失败时不再整批跳过(否则"收头+大圆角"整体静默失效); ⑦ini 配置补中文注释(与 offset/jrt 一致, 新增 dt:slot-param-labels); ⑧删未使用的 exclude 形参与死局部; ⑨改文件头旧图层名"出线槽通道"(触发 check_lisp 死名告警) |
-| slot | **v10.3** | **健壮性修复(几何零变化; 版本号跳过已废弃的 v10.2)**: ①**补回 v10.2 随整版回退丢失的标注文字类型防护** —— collect-heads/collect-ends 按新增 dt:curve-p 过滤, 各图层收集(slot-trim/fillet-all/extend-fixed/join)走 dt:curves-only, 修"小圆角 R 递减 → CX 层写 Rn 标注 → 后续延长/大圆角/封闭对文字求端点必崩"链; ②dt:fillet-pair 改名 **dt:slot-fillet-pair**, 缺省层/缺省半径由 offset 的 "FLB"/*dt-fillet-r* 改为本脚本 "CX"/*dt-slot-fillet-r-small*(消除跨脚本隐藏耦合, 坑 #46); ③cut-params getparamatpoint 包 catch+剔 nil; ④对话框 load/start_dialog 包 catch+保证 unload, ini/dcl 句柄兜底关闭; ⑤c:SLOT 的 *error* 兜底闭合 UNDO 组; ⑥参数应用负值回退; ⑦cross-points 包围盒预过滤(新增 dt:rect-bb-pts/dt:rect-bbox/dt:bbox-overlap-p 库副本); ⑧删重复注释块 |
-| jrt | v9.5 | **新增独立脚本**：LD±29 三层嵌套加热条轮廓、交汇裁剪+圆角、端帽按 gap 判定(RZ 圆帽/直线帽) |
-| jrt | v9.6~v9.8 | 端帽/圆角参数化(jrt_cap_r/jrt_fillet_r 19)、内层数可调(jrt_inner_count)、多模板框架(dt:jrt-template-table+模板对话框)；详见 jrt 文件头 |
-| jrt | v9.9 | 新增"两点式"模板(JRT 源线+JRTDW 定位线内偏嵌套) |
-| jrt | v9.10 | 模板更名 通用→通用一、两点式→通用二；通用二扩写出线口 |
-| jrt | v9.11 | 出线口修正：壁裁剪保留 cap 侧/裁 pint 侧 |
-| jrt | v9.11b | find-dcl 弃用旧 findfile 候选链(v95~v98 文件名已不存在)，统一 *dt-script-dir* 确定性模式（与 offset/slot 对齐） |
-| jrt | v9.12 | **参数默认值外置 jrt_runner.ini**(按模板分节) + 参数记忆(按模板各一套, 上次模板+上次值跨会话)；恢复默认 = ini 默认值 |
-| jrt | **v9.13** | **全面审查定稿**(与 offset v10.2d 同期): ①atof→distof; ②INI 节名解析修复(坑#59); ③mem 文件不再重复写出第二个 [模板] 节; ④补声明遗漏局部(dt:jrt-decide 的 o、dt:jrt2-neck 的 p/sgn/wx、dt:jrt2-junction 的 t2 等); ⑤闭合多段线判定补错误检查; ⑥移除出线口相交处的遗留【调试】输出; ⑦更陈旧注释(两点式→通用二、参数项数) |
-| jrt | **v9.14** | **健壮性修复(几何零变化)**: ①LD 源图层混入文字/块不再崩溃 —— c:JRT 取 LD 后统一 dt:curves-only 过滤(原 dt:jrt-touch-p/jrt-free-ends 对全量 LD 对象直接求端点, 无 catch 无过滤), jrt-trim/jrt-fillet 的 LD 引用同步过滤; ②cut-params getparamatpoint 包 catch+剔 nil; ③对话框 load/start_dialog 包 catch+保证 unload, ini/dcl 句柄兜底关闭; ④c:JRT 的 *error* 兜底闭合 UNDO 组; ⑤参数应用负值回退; ⑥cross-points 包围盒预过滤(新增 dt:rect-bb-pts/dt:rect-bbox/dt:bbox-overlap-p 库副本, collect-heads 按 dt:curve-p 过滤) |
-| dt_start | v1.0~v1.3 | 一键加载/自启动引导器：v1.1 修四段 if+正式版优先；v1.2 修 digits 取位差一；v1.3 加 DTDBG 诊断 |
-| dt_start | v2.0 | 重构：acaddoc 钩子显式 `(dt:st-init "<目录>")` 注入 *dt-script-dir*，治多副本定位错乱/stringp |
-| dt_start | v2.1~v2.3 | **顶部菜单模块「热流道自动化(R)」**二级分组(分流板/出线槽/加热条/工具/关于)：2024 移除 MenuGroups.Add(坑 #50)→改 ACAD 主菜单组塞 popup；会话内只建一次+同名残留复用 |
-| dt_start | v2.4~v2.5 | 菜单宏定案(坑 #51~#53)：chr(3) 真取消码 + 全 LISP 表达式宏 + 尾空格=回车 → 点击即执行 |
-| dt_start | **v2.6** | **老版本兼容并入正式版**: TRUSTEDPATHS 的 getvar/setvar 包 vl-catch-all(该变量 2016 才引入, 2007~2015 静默跳过)。**正式版与 old\\dt_start.lsp 合并为一份、全版本通用**, 不再需要按 CAD 版本挑文件(两份现逐字一致)。**(v2.9 修正: catch 只挡"抛异常"、挡不住"静默返回 nil", 老版本实际仍会崩, 见坑 #65)** |
-| dt_start | **v2.8** | acaddoc.lsp 钩子读/写中途异常兜底 close(句柄不滞留, 与 offset v10.6 / slot v10.3 / jrt v9.14 同期健壮性收尾); 其余逻辑零变化(版本号 2.7 未对外发布, 直接顺延) |
-| dt_start | **v2.9** | **低版本「参数类型错误: stringp nil」根因修复(坑 #65, 用户 2007 实测 DTINSTALL 报错)**: 老版本 getvar 读本版本没有的变量**静默返回 nil**(非抛异常), nil 流进 strcat/strlen 即炸。新增 `dt:st-gets`/`dt:st-hasvar`/`dt:st-support-root` 兼容底座(抛错/nil/非字符串统一返回 ""), 封死三处泄漏点 —— st-trusted-add/del(TRUSTEDPATHS, 2007~2015 命中)、st-acadoc-path + st-write-hook(ROAMABLEROOTPREFIX)、st-locate(DWGPREFIX); st-split 补 null 返回; st-add-support 加 front 参数(支持根不可用时 acaddoc.lsp 兜底写脚本目录并置顶支持路径); DTINSTALL 改序(先加支持路径 → 再写钩子 → 再 TRUSTEDPATHS)并打印 ACADVER/支持根/变量可用性; DTDBG 加 `[0z]` 环境探测段。新增 `tools\check_sysvars.py` 门禁(反向验证: v2.8 命中 5 处风险, v2.9 全过) |
-| 全部 | **编码补丁 2026-08-31** | **用户 2007 实测加载报「输入中的点位置不正确」, 定案坑 #64**: ≤2020 的 MBCS(GBK) LISP 读取器读 UTF-8 文件必炸(双字节吞字符, 报错位置与真实问题无关)。新增 `tools\make_ansi.py` 发版工具 + `scripts_ansi\` GBK 副本目录(说明.txt 同目录), §2.3 兼容表改双轨: 2007~2020 用 GBK 副本 / 2021+ 用 UTF-8 原版; 代码零改动(仅注释/提示文字 4 个符号替换) |
-| 全部 | **低版本补丁 + 2007 实测 2026-08-31** | **2007 上 DTINSTALL 报「参数类型错误: stringp nil」, 定案坑 #65**: 与编码无关(两份 dt_start.lsp 逻辑逐字相同, 仅注释装饰符号差异), 根因是 getvar 静默 nil, 见上方 v2.9 条目。**修完用户 2007 实测通过**: GBK 副本 APPLOAD → DTINSTALL 一次成功 → 三脚本加载 + 顶栏菜单挂出。至此 2007~2026 全链路打通(2007 无 TRUSTEDPATHS, 安装时打印"无(老版本, 跳过)"属正常) |
-| size | **v1.0** | **新增独立尺寸测量脚本 (size_runner.lsp v1.0, 500行, 19 defun)**：架构解耦，建立第 4 独立脚本，与 offset/slot/jrt 形成 4 家族等价架构。支持：①FLB 图层自动探测与提取；②双引擎闭合判定(vla-AddRegion + 0.5mm 容差端点拓扑度数)；③未闭合自动转入手动框选模式，手动选线未闭合明确告警并取消；④AABB+OBB 最佳外接矩形求最长与最宽；⑤自动写入 Windows 剪贴板(如 350x180)；⑥交互式确认后在 FLB_BOX 专用图层绘制外包矩形及字高≥15 的长宽标注；⑦顶栏菜单在出线槽之后挂载「测量数据(&M) ▸ 测量分流板(&F)」 |
-| wx | **v2.0** | **升级外协加工与数据测量工具箱 (wx_runner.lsp v2.0, 1092行, 39 defun)**：更名自 size_runner，架构融合，支持：①线切割出图 (c:XQG)：FLB 双引擎闭合检测/手动框选，全自动按当前系统年月生成子目录与日期命名 (如 26\09\09.04.dwg)，已存在时回车默认追加平铺/输入N自动递增新建 09.04_1.dwg，免弹窗直达目标，AABB 向右平铺(50mm 间距)防覆盖，MText 宽度设限自动折行(2~X行)居中标注原图纸名；②精雕出图 (c:JD)：仅提取热流道脚本生成的自动化图层白名单曲线 (FLB, LS, RZ, DK, JRT)，彻底排除 CX/JT/FBX 等无关曲线，同规则自动命名/递增克隆至精雕目标 DWG 并向右平铺，MText 折行标注图纸名(宋仿黑/Standard 字体探测降级)；③数据图纸 (c:SJTZ)：白名单图层提取，支持鼠标自由拖动或输入位移交互式复制，图形右侧+30 处生成规范化双列信息文本块，列间距扩大至 95mm 彻底消除重叠，无空格系统日期 (YYYY.M.D)，客户/中心距/热咀/出线留空不弹窗打扰；④新增 `wx_runner.ini` 配置文件支持自定义各分支保存根路径 |
-| dt_start | **v3.0** | **顶栏二级菜单重构 (dt_start.lsp v3.0, 762行, 30 defun)**：将「测量数据(&M)」升级为「外协加工(&W)」，下挂 4 个三级子项：测量分流板(&F) / 线切割(&W) / 精雕(&J) / 数据图纸(&D) |
-| offset | v10.6 | 纯洁分流板生成职责，剥离测量逻辑，维持 2576 行，98 defun |
-| flb | **v10.7** | **全系统名称对齐重命名 (flb_runner.lsp v10.7, 2582行, 100 defun)**：offset_runner.* 更名为 flb_runner.* (lsp/ini/dcl/mem)；主命令升级为 FLB/FLBPARAM，保留 c:OFF 与 c:PARAM 兼容别名；内部函数与变量全面迁移为 dt:flb-* 与 *dt-flb-*；引导器菜单宏与检查清单同步对齐 |
-| cx | **v10.4** | **全系统名称对齐与参数修复 (cx_runner.lsp v10.4, 1498行, 70 defun)**：slot_runner.* 更名为 cx_runner.* (lsp/ini/dcl/mem)；主命令升级为 CX/CXPARAM，保留 c:SLOT 与 c:SLOTPARAM 兼容别名；内部函数与变量迁移为 dt:cx-* 与 *dt-cx-*；修复 DCL 控件 key 遗留为 slot_* 导致的参数框不显示与恢复默认失效，全量对齐为 cx_* |
-| flb | **v10.8** | **新增主进胶参数与图层 (flb_runner.lsp v10.8, 2620行, 101 defun)**：①新增参数 `zjj_r` (主进胶半径 R，默认 14.35)；②新增图层 `ZJJ` (颜色 210 紫色)；③自动化生成：无 LD 时预建 14 图层，并在检测到 DP 垫片圆时自动在圆心创建 R14.35 主进胶圆；重跑时自动清理旧 ZJJ 产物；④14 图层非冲突颜色全量对齐 (FBX=3绿, JTFBX=70黄绿, DK=8灰, CX=140天蓝, CXK=150亮蓝, JRTDW=40橙黄, ZJJ=210紫) |
-| wx | **v2.1** | **外协加工与数据图纸全量体验加固 (wx_runner.lsp v2.1, 1102行, 41 defun)**：①平铺间距翻倍至 150.0mm；②线切割与精雕字高设为 15.0；③新增 `dt:sz-format-multiline`，解决工业连字符文件名 (如 SL-26142-RLD-PC+ABS-9.1) 无空格时不自动折行的问题，按符号断句并注入 \P 实现多行居中；④彻底根除「读取形文件 simsun.ttc 时出错」：严禁 put-fontfile 绑定 ttc 路径，改用 COM 原生 vla-setfont 134/34 绑定宋体，大字体兜底；⑤首图新建 was-closed 标 T，确保保存后物理关闭刷盘，首张图纸上方立刻带文字；⑥数据图纸 c:SJTZ 重构为单一整体 vla-addmtext 多行文字图元，双击可一次性直接修改所有空缺数据 |
-| wx | **v2.2** | **外协加工正反面镜像排版与摆正升级 (wx_runner.lsp v2.2, 1395行, 49 defun)**：①倾斜工件自动正交旋转摆正 (`dt:sz-detect-tilt-angle` + `dt:sz-straighten-objs`)：线切割、精雕、数据图纸统一支持工件正交旋转摆正；②精雕上下镜像正反面排版：原生在活动图纸执行 `dt:sz-mirror-in-curdoc`（镜像轴 $Y = -37.5$，严格 75mm 间距），杜绝后台非活动文档 UCS 崩溃与样条曲线 Knot-vector 异常 (坑 #70/#71)；③精雕图层分离与全量保留机制：手动模式 100% 全部图元保留，正反面零丢失；自动模式正面排除 RZ/DP，反面排除 ZJJ/DK；④主进胶 ZJJ 与 DP 纳入精雕与数据图纸提取白名单；⑤数据图纸克隆体独立置入专用隔离图层 "数据图纸" (颜色 7 白色)，彻底防止克隆图形残留于 FLB 干扰后续 `FLBSZ` 尺寸测量；⑥彻底根除 `*error*` 中调用 `(command "_.UNDO" "E")` 导致的 `*push-error-using-command*` 报错 (坑 #69)，全面改用 COM `(vla-StartUndoMark)` / `(vla-EndUndoMark)`；⑦修复 AutoLISP 无原生 `stringp` 谓词崩溃 (坑 #68) |
-| wx | **v2.3** | **精雕/线切割排版改版 (wx_runner.lsp v2.3, 1471行, 51 defun; 用户需求)**：①精雕镜像改在本体右侧——`dt:sz-mirror-in-curdoc` 签名改为任意轴两点，竖直镜像轴 X = 本体宽 + 37.5（正反面间隔仍 75mm）；②每幅（本体+镜像+文字）整体包络盒：文字生成后取实际 bbox 精确包络（四边各留 20mm），画在独立图层"外协包络盒"（绿色 3），LWPOLYLINE 闭合矩形；③4 幅一行网格排版（1234/5678，行满向下追加）：排版游标存目标图纸 USERI5（幅数）/USERR5（上幅 Y 基线），随 DWG 保存跨会话可靠续排，旧图纸无游标自动从现有内容右侧迁移续排；列距/行距走 wx_runner.ini 新 [排版] 节 col_gap/row_gap（默认各 100mm）；④线切割仅改网格布局（不加包络盒）。新增 dt:sz-sysvar-get/-set；`dt:sz-mirror-in-curdoc` 为内部函数单一调用点 |
-| dt_start / demo | **v3.1 / v1.0** | **演示记录器加入工具箱 (dt_start v3.1, 787行, 31 defun；新增 scripts\demo_recorder.lsp v1.0, 277行, 14 defun)**：①工具子菜单新增「演示记录器(&M)」→ c:DTDEMO 按需加载 demo_recorder.lsp 并开/关录制（不进家族表、不随启动加载——反应器工具常驻无必要；文件缺失明确提示）；②demo_recorder v1.0：命令级反应器把手工操作录成 AI 可读日志（图纸目录 cad_demo_log.txt）——记录命令开始/结束/取消、LASTPOINT 拾取点（vlr-sysvar-reactor，创建失败自动降级为仅命令+实体）、新建实体（entlast 句柄标记增量识别：类型/图层/关键几何）；命令 DEMOREC/DEMOSTOP/DEMOMARK，ZOOM/PAN 等噪音过滤，getvar 全走 demo:gets 兜底（坑 #65 模式），日志主体 ASCII；③check_lisp.py 新增 demo 清单分支、make_ansi.py FILES 增至 6 个、dt_start 版本串 v2.9→v3.1（README/本文件此前已按 v3.0 记账，磁盘串本次对齐） |
-| jrt | **v9.15** | 【已废弃，被 v9.16 取代】首版单线补边——把出线口误判为"端部喇叭"(两条手画 R12 弧实为出线口过渡弯), 生成几何与需求不符, 未交付使用 |
-| jrt | **v9.16** | **通用二「单线自动补边」定稿 (jrt_runner.lsp v9.16, 2535行, 102 defun)**：用户只画 ①外壁整圈(JRT 层; 直线/圆弧/开放多段线, 闭合多段线不支持) ②JRTDW 定位短线(每处出线口一条, 贴外壁指向板边)。脚本自动完成旧手工三步：偏移(JRTDW 朝两边偏 jrt2_half_w=16.5 → 通道两壁线)；裁剪(外壁在两过渡弧切点间开口, dt:cut-params+dt:rebuild-seg 保留段重建)；圆角(外壁断头↔通道线过渡弧 jrt2_end_r=12, 任意夹角按 r/tan(α/2) 解析, 直角即 R12)。生成件(通道线/过渡弧/切口后壁段)为持久源线不入重跑清理表(与手画产物同权, 嵌套/破口封闭/颈线引擎零改动)；重跑幂等(已有通道线即跳过)；钩子在分组前执行(dt:jrt2-hooks)。来源: 用户截图(外壁+JRTDW短横线)与 v1.0 演示日志(2 条 R12 弧即出线口过渡弯)交叉确认 |
-| cx | **v10.5** | **出线槽自动布置压线板 (cx_runner.lsp v10.5, 用户需求, 模板=tools\1.dxf 的 YXB 图层)**：①c:CX 运行时询问贴左壁/右壁(initget L/R)；②在 dt:cx-process 的封口与删源线之间执行 dt:cx-yxb——每条源线选定侧的直壁上，每隔 cx_yxb_gap(125, 进参数框/ini)放置一幅压线板；③模板 9 实体(重合线 16.6 贴壁 + 上下边 11 + 右端 R4 弧×2 + 中部 R5.75 圆 + 2 条 0.01 碎线；1.dxf 中重复弧只画一次)，重合线与壁线完全重合(斜壁同步旋转, 本地 +Y→壁方向 / +X→外侧法向)；④碰撞规则：重合线以外的曲线与图中任何实体相交即碰撞，沿壁滑动让位(步进 10, 上限 50)，无位可让跳过该处；⑤YXB 层青色 4 脚本独占(每次运行先清旧实例)；钩子在删源线之前执行(用源线判外侧方向)；⑥坑 #69 根除：本文件 (command "_.UNDO") 改 dt:cx-undo-mark/-end(COM 标记)，*error* 不再碰 (command)；check_lisp CX 白名单同步(dt:cx-yxb 系列, 并修正历史死条目 dt:cx-break-curve→dt:break-curve) |
-| 批次19 | **wx v2.17** | **归堆间距可配(用户需求, v2.16 实测通过后的收尾)**: wx_runner.ini 新 `[测量加热条]` 节 `strip_gap`(默认 15.0) —— JRTSZ 的归堆间距(两线最小间距≤此值归同一根条)由硬编码 15 改为可配; 误填 <1 回落默认 15(防把一根条的嵌套线拆散); 逻辑零变化(默认值与 v2.16 一致)。wx ini 为只读文件(缺失/缺节回退代码内置默认), 手工加节即生效。README_CAD §6.4 同步。 |
-| 批次18 | **wx v2.16** | **修 v2.15(未交付)实测缺陷(用户实测: 结果=三层线加一起没除/没取中间值)**: v2.15 几何识别兜底在用户图上没认出封闭线, 三层线被封闭线连成一串后整体当成"一条线"量了总长(单一线链的"中位数"=总长)。**按用户定案重做封闭线排除: "生成时怎么画封闭线, 测量时就怎么认"**——①只剔封闭线本身, 圆弧一律不再连带剔除(相切弧带出废除); ②几何复核 = 生成规则反推(dt:sz-jrt-close-pick): 候选=两头都接在别的曲线端点上的短直线(<max(6%全条长,40)), 单根试剔→不见分晓再成对试剔(封闭线两头各一根必须一起去; 成对只试最短12根防组合爆炸); 接受判据=剔后线链"几乎等长"(整齐度=相对中间值极差变小 且 最短/最长≥0.8单剔/0.45成对)——生成就是一条轮廓向内偏移N次, 各层长度天生几乎相等; 剔后更乱(普通轮廓短段被误去的样子)一律不动——v2.15 的"近垂直切向过滤"与"连通分量数不增加就整体放弃"一并废除; ③每条都跑几何复核(不再只在无JRTFBX时启用), JRTFBX 只匹配到一半时剩下那根自动补剔; ④圆帽整圆(无端点)与侧线切点补"端点贴线身"相接判定(dt:sz-jrt-adj-p), 通用一圆帽条此前会被拆散成侧线+整圆各算一条; ⑤结果输出加各层线长明细+差异>20%请人工核对警告, 措辞改大白话。函数增删: -tangent/-touch-p/-comps/-geo-pass, +adj-p/+comps-i/+lens-at/+spread/+joined-p/+close-pick(73 defun, 2410行)。check_lisp WX 清单同步。 |
-| 批次17 | **wx v2.15 / dt_start v3.4** | **新增测量加热条长度 JRTSZ(用户需求, 挂「外协加工」与测量分流板同级)**：①口径 = 一条加热条 N 层嵌套轮廓线, 长度取各层**中间值**(用户方案一"总长/条数"的稳健化; 优于方案二"造中线"——免新建临时实体, 纯只读); ②封闭线排除双通道——(1) JRTFBX 副本精确匹配(v9.36 起破口封闭线本体在 JRT+同几何副本在 JRTFBX, 两端点无序重合<0.5 即剔除); (2) 几何识别兜底(方案被 v2.16 替换, 见批次18); ③分条 = 全部 JRT 曲线按最小间距 15mm 单链聚类(嵌套层距=步长默认4远小于15, 不同加热条物理间距远大于15; bbox 预过滤+双向5采样投影); ④交互 = 单条自动测, 多条列清单(段数/线数/中心坐标)+getpoint 就近匹配点选+可连续测量; ⑤完整性(用户要求不降级手动选): 无 JRT 曲线/仅1条开口线/端点断口(间距0.01~2mm, 上界取相邻层端头最小步距之下防误报)→弹窗取消; 短链(<0.5×中位)/整圆仅提示(整圆按轮廓计入, 通用一圆帽请人工核对); ⑥结果写剪贴板(fmt-num)+弹窗+命令行明细; 只读测量零建层。dt_start v3.4: 外协加工子菜单插「测量加热条长度(JRTSZ)」(三级序: 测量分流板/测量加热条长度/线切割/精雕/数据图纸)+about 清单同步。 |
-| 批次16 | **wx v2.14** | **修 v2.13 实测缺陷(用户截图: 同一行各幅 Y 乱飘 + 永不换行)**：根因 = v2.13 用「目标图里 MText 的 boundingbox」算行顶/行右缘, 而 AutoCAD 对**非活动文档**中刚 CopyObjects 过去的 MText, 实体范围(boundingbox)不可靠(与本项目已知的「非活动文档 图层色/字体不即时生效」同类坑) —— 实测把行顶算低 86mm → 每幅 Y 偏移 → 下一幅文字插入点 Y 与上一幅差 >1mm → 行判定失效(grid-col 恒 1) → 永不换行, 6 幅全挤一行且 Y 乱跳。**修法: 排版基准只取可靠源** —— ①行判定/行内容顶: 「外协文字」插入点(属性直读; 插入点 = 文字底边 = 内容顶 + text_gap) → row-ctop; ②行右缘/内容最底缘: 内容实体 bbox(线框数据) → dt:sz-row-right 签名改 (doc ctop margin); ③单元盒尺寸: 在当前图量(4f)。另把**换行起点由固定 x=0 改为对齐已有内容左缘**(往任何图里追加都不再阶梯错位), 行内追加盒顶 = 本行内容顶 + (文字高 + text_gap) + box_margin。回归 check_audit_fixes B-12 加硬断言: 文件内不得再出现 MText bbox 读取(`txt-bb` 清零)。 |
-| 仓库 | **2026-09-09** | **ini/dcl/mem 全部移出仓库**（用户定案）：`.gitignore` §2.2 全局排除 `*.ini`/`*.dcl`，并 `git rm --cached` 10 个运行生成物（cx/flb/jrt 的 3 个 .dcl + 4 个基础 .ini + 3 个 `*_mem.ini`；本机文件全部保留）。依据：dcl 由 `dt:*-write-dcl` 弹框时自动生成、ini 由 `dt:*-cfg-boot` 首次运行生成、mem 为本机参数记忆、`wx_runner.ini` 仅在被读取且缺失时回退代码内置默认 —— **移除不影响任何功能与新机部署**。回滚：`git revert` 该提交或 `git checkout <提交>^ -- scripts/` 后重新 add 纳管 |
-| 批次15 | **wx v2.13** | **外协排版间距根治(用户需求 四项)**：①**精雕包络盒间距四向统一** —— 旧盒定义不对称(左/下 出图点−20, 上=文字顶+20), 实测横向净距 = box_gap−20、纵向 = 50+文字高−box_gap(略重叠); 改为「单元盒 = (图形 ∪ 本幅文字) 外扩 box_margin」, 行内追加 = 上一幅盒右缘 + box_gap, 换行 = 内容最底缘(排除 外协文字/外协包络盒)下方 box_gap → **四向净距恒 = box_gap**; ②**线切割间距偶发不一致根治** —— 旧版会话游标缺失(新开 CAD/换目标图后的首幅)时回退「文字 maxx + 20 + box_gap」, 文字居中且宽钳 <=220、比工件窄 → 首幅间距偏大(实测 10 幅里 1 幅不同); 新增 dt:sz-row-right 由几何反推本行单元盒右缘(判据 bbox maxY <= 本行盒顶 即本行, 与图形高度无关); ③**文字与图形的距离可配** —— 旧硬编码 50 → 新增 [排版] text_gap, 基准 = 图形最小包络盒顶边(摆正后的最小外包盒, 等价于 FLBSZ 的 AABB/OBB 算法; 不实际生成包络盒); ④**[排版] 四项全可配**: box_gap / per_row / text_gap / box_margin。实现: 文字改为在当前图先临时生成并量出真实包围盒(与图形合成单元盒)后随工件一并拷贝(旧版是拷完再补文字), 新增 dt:sz-make-title 统一规格; dt:sz-doc-ms-bbox 增可选 excl-layers(排除 外协文字/外协包络盒 求内容外包盒)。回归 check_audit_fixes B-12 改写为「几何/单元盒基准」断言(旧「文字 maxx」基准清零)。 |
-| 批次14 | **jrt v9.36 / wx v2.12** | **①jrt 封闭线图层契约定案(用户定案: 采纳"本体+定位副本"方案, 不选"外协补白名单")**：v9.34 把通用二破口封闭线整体挪到 "JRTFBX", 破坏"JRT=完整加热条"契约 —— 外协加工按图层白名单(dt:sz-collect-auto-curves 的 FLB/LS/RZ/DK/JRT/DP/ZJJ)取线, 漏 JRTFBX 即数据图纸/精雕出图缺封闭线, 且需长期维护"JRT+JRTFBX 并集"隐性契约; 改为: 封闭线本体回归 "JRT"(加热条与 v9.33 完全一致), 新增助手 dt:jrt2-trace 在 "JRTFBX" 描一份同几何定位副本(供另一项目建模脚本按层定位), 副本并入 *jrt2-made* 参与重跑幂等清理; JRTFBX 不在外协白名单 → 定位层不混进加工出图(外协侧零改动); check_jrt2_out.py 口径回归单层 "JRT"(断言 15弧+14线/自由端2 不变); check_audit_fixes.py A-04 改写为契约断言(两侧均不得直接 put-layer JRTFBX, 须经 dt:jrt2-trace; ensure-layer JRTFBX 恰 1 处); check_lisp 关键函数清单 +dt:jrt2-trace。**②wx v2.12 精雕配色(用户需求)**：JD 层色 101(薄荷绿)→2(黄), 且精雕正反面实体统一置黄 2(覆盖 v2.7~v2.11 的逐实体保色); 外协包络盒 222(紫红)→3(绿, 层色与盒实体色同步)。精雕输出为独立 dwg、与主图 JRT(黄2)/FBX(绿3)同色不构成同图歧义 —— check_layer_colors.py 新增 CROSS_DWG_EXEMPT={JD,外协包络盒} 豁免其 B/C 校验(A 登记核对与 D 字面量白名单仍照查), 打印行改"去重色号 19 个"。 |
-| 批次13 | **jrt v9.35** | **通用一封闭线回退(需求澄清: 加热条封闭线只加在"出线口", 且仅通用二可实现)**：通用一是"半成品"嵌套轮廓, 根本没有出线口, 其直线帽封闭线属端帽, 与"出线口封闭线"不是一回事 —— 撤销 v9.34 对通用一的全部改动: dt:jrt-cap-line 三处 put-layer 回归 "JRT"(整弧替换帽/直角帽线/直线封闭线); dt:jrt-snapshot/dt:jrt-diff 与 dt:jrt-build 快照回归单层; 通用一建层(ensure-layer JRTFBX)/重跑清理(purge JRTFBX)/完成提示语一并回退; 头注图层说明改注"JRTFBX 仅通用二"。**保留**: 通用二破口封闭线 JRTFBX + 全图层配色重排(含 dt:ensure-layer 已存在图层校正登记色); OFF 预建 15 层/demo 监视表/check_jrt2_out 两层并集口径均为通用二所需, 不动。回归 check_audit_fixes.py 增 A-04(通用一不得再出现 JRTFBX: put-layer/快照/清理; 通用二 dt:jrt2-close 仍传 "JRTFBX") |
-| 批次12 | **jrt v9.34 / flb v10.11 / cx v11.8 / wx v2.11** | **加热条封闭线独立图层 JRTFBX + 全图层配色重排(用户需求)**：①新图层 "JRTFBX"(加热条封闭线, 浅橙 21)——jrt 通用一直线帽的帽线(含 capr≈0 直角帽线与 capr≥半宽 整弧替换帽)与通用二破口封闭线改放该层(圆帽圆与帽角过渡弧仍在 JRT; dt:jrt2-close 调用点传层名, dt:jrt-cap-line 三处 put-layer 改层); snapshot/diff 改 JRT+JRTFBX 并集 → 裁剪/断口圆角/零长清理的实体集合与挪层前一致(帽线只被 set-endpoint 端头修剪, 原层保留不重建); 重跑幂等: 通用一清理扩 purge JRTFBX, 通用二句柄清理 member 扩 "JRTFBX"; OFF 预建清单 14→15 层(通用/矩形两处); check_jrt2_out.py 默认口径改 JRT+JRTFBX 并集(实体集合不变, 断言数值不变); ②配色重排——旧版 5 对图层完全同色(LS=YXB, FBX=外协包络盒, LD=JD=数据图纸=外协文字)且黄色系(JRT/RZ/JRTDW/JTFBX)蓝色系(DP/CX/CXK/FLB_BOX)大面积相近, ZJJ 210 在 AutoCAD 现行调色板与 JT 6 同显洋红; 重排 11 色: JRTDW 40→61 浅黄绿, JTFBX 70→230 玫红, ZJJ 210→193 灰紫, CX 140→161 浅蓝, CXK 150→122 青绿, YXB 4→84 深绿, FLB_BOX 130→42 赭黄, 数据图纸 7→63 橄榄绿, JD 7→101 薄荷绿, 外协文字 7→144 深青, 外协包络盒 3→222 紫红, 新层 JRTFBX=21 浅橙; 色源=ezdxf DXF_DEFAULT_COLORS(AutoCAD 标准 ACI), 两两最小 Lab dE 31.3; ③ensure-layer(flb/jrt/wx)+cx 内联建层: 已存在图层也把颜色校正为登记值(老图重跑自动换新色); ④新增回归 tools\check_layer_colors.py(+tools\_aci_colors.py 标准色表): 全脚本登记色一致/唯一/两两 dE≥30/put-color 字面量不得用登记外色号(上线首跑即抓到 wx 外协文字漏改残留 7) |
-| 批次11 | **cx v11.7** | **压线板左壁畸形根治 + 内/外壁整圈取侧(用户 1/2.dxf+png 实测)**：①左壁畸形根因 = dt:cx-yxb-draw 的本地系(+X→外法向 nrm, +Y→壁向 u)在左壁侧(nrm=rot90ccw(u), 外法向未翻转)是左手系(镜像), 而弧角按纯旋转 +a1 处理 → 两条 R4.3 过渡弧各偏 90°接不上上下边线, 板全数断开(1.dxf 实测 42/42 弧端点脱开, 1.png 每幅板断成两个不相连组件; 右壁恰好右手系, 故仅左壁畸形); 修复 = 镜像系(hand=nrm×u 的 z 分量<0)下弧角区间反向 [s,e]→[a1-e,a1-s], 直线/圆不受影响, 右壁路径零改动; ②曲折出线槽的左/右壁随各源线绘制方向漂移(同一圈一半内一半外, 2.dxf 实测) → c:CX 提示词增 内壁(I)/外壁(O), 新增 dt:cx-yxb-resolve-side: 按"相连源线(相交或端头距≤1.2×偏移, 平行远通道不误入)中点多数侧=内侧"整圈一致取侧, 孤立直线/平票按 内=左/外=右 兜底并打印提示, 左/右壁语义保留(直线出线槽沿用); ③回归 test_direction.py 扩至 16 组 89 断言(§15 六壁向×左右系"旧公式断开/新公式闭合"+§16 2.dxf 六源线内外侧复现/孤立兜底/远平行不投票) |
-| 批次10 | **jrt v9.27** | **用户六图手工流程定稿(出线口裁剪/圆角连接方向)**：①硬 bug 确诊 = v9.22 的 pw=stub×wall 求交写在 (vla-delete wall) 之后, 对已删实体求交恒失败 → e-out 恒退化为起笔端, 通道线保留侧随画向翻转(留里删外), 连带圆角接错→封口线错位(图6 板内假封线); pw/e-out 移到删 wall 之前; ②trim-line 比较方向修正("保留离 out-pt 远的端点"→"近的")——旧代码靠 pw 失效双重负负得正, pw 修正后必须归正; ③长定位线一头埋板内(图1 画法)根治: 新增 dt:jrt2-out-end(直线端点按轮廓围合区域 dt:jrt2-region-edges-n(12) 分里外, 两端同侧/区域不可判→nil 弃权)+dt:jrt2-seg-rebuild; hook-one 开头对 stub 两端分类得 s-in/s-out, 过渡弧方向 d=里→外(切点/弧向/开口全朝板边, 图4), 通道线裁剪保留[切点fp→板边端](板内伸出段+内端延长删除, FLB 外延长保留, 图3), 分类弃权回退修正后的 v9.22 启发式(旧贴壁短线行为不变); ④封口规则保持现状(用户定案: 圆角连接正确后封线只出现在出线端); 回归扩至 14 组 52 断言(长线里外分类与起笔方向无关/保留段不含板内点/短线分类弃权回退) |
-| 批次9 | **jrt v9.26** | **用户三轮实测修复(颈线仍反向 + 圆弧壁开口碰不到)**：①颈线方向二次根治 = v9.24 包围盒中心判据只对**凸形** FLB 可靠, L 形/带台阶外框的凹区翻错方向 → 主判据改 FLB 围合区域奇偶点内(dt:jrt2-region-edges-n 新增 n 参数, 颈线 24 段/曲线采样——12 段时 R=400 弧弦割线内缩可达 13.6mm 会吞掉 5mm 探针致漏判, 24 段误差 ≈3.4mm), 围合不可得才回退包围盒中心, 再回退保持原向; ②新增参数 jrt2_hook_ext(出线口通道延伸, 默认 5.0, 进参数框/模板参数表/ini/记忆, 0=旧行为) = 外壁为圆弧/圆时壁面在 ±half_w 偏移处"让开", 通道短线够不着 → 实测日志"通道线未与外壁相交, 跳过"(连锁致破口封闭 0 条)；dt:jrt2-hook-one 生成 ch1/ch2 后经新助手 dt:jrt2-line-extend 双端各延 ext 再走找壁/弧/裁剪全链路(延伸线即持久产物; ch-exist 幂等按垂距+平行判定不受影响); ③check_lisp 关键函数清单 +line-extend/+region-edges-n; 回归扩至 12 组 44 断言(L 形 FLB 奇偶对/包围盒翻错固化、R400 大弧 12vs24 段、ext=0 不交/5 命中复现)|
-| 批次8 | **jrt v9.25 / cx v11.3** | **用户二轮实测修复(崩溃确诊+判据换方案+PL 直壁支持)**：①jrt v9.25 "参数类型错误: numberp: nil"(v9.24 引入)根因 = vlax-curve getpointatparam/getdistatparam 越界会返回 nil 而不抛错(实证: wx 采样函数本就 error-p+非nil 双判), v9.24 新助手只判 error-p → nil 点混入边集 → (min (cadr a) nil) 崩; curve-edges/curve-len/mid-pt/pt-inside 全线补双判;"内向偏移次数失效/多一圈朝外" = 该崩溃伴生(崩在删除落选候选前, ±两圈同留 JRT 层)——重测前需手动删崩溃残留一次；②内偏主判据按用户方案重写: 锚段两候选各整环传播(dt:jrt2-propagate 非破坏式)成 RingA/RingB, 环级"到 FLB 壁平均最近距离"(dt:jrt2-flb-score)裁决——距 FLB 更近=方向反了, 取更远环=朝内; 围合奇偶判定降回退 1, JRTDW 就近回退 2; 判定阶段零删除+候选创建即登记句柄入 *jrt2-made*(崩溃残留下次运行自动清); 颈线无交点提示语明确"延长 JRTDW 至与 FLB 相交"; ③cx v11.3 压线板"两侧都放不出"根因 = find-wall 只认 AcDbLine, PL 多段线画的通道壁恒被判非直线; 新增 dt:cx-yxb-segs-of 按曲线参数逐段拆壁(凸度≠0/AcDbArc 弧段按 v11.2 定案跳过并计数), dt:cx-yxb-find-walls 收集全部匹配直段, plan 逐段规划(一条壁可产多段); 无直段时打印自诊断(弧段/不平行/侧不符/垂距不符计数+最近中点垂距偏差); ④check_lisp 关键函数清单同步(jrt2 新函数 10 个入列, dt:jrt2-rec-of 移除; cx find-walls/segs-of 替换 find-wall); 回归扩至 9 组 36 断言(整环 FLB 判据/采样 nil 防护/多段线拆段与选侧)|
-| 批次7 | **jrt v9.24 / cx v11.2** | **方向与压线板双根治(用户实测)**：①jrt v9.24 通用二内偏方向随机根因 = 全程以 JRTDW 画向判内外(dt:jrt2-layer 锚段/候选取"离 JRTDW 近")，手绘习惯一变即翻车；改几何判定：新增 dt:jrt2-region-edges(轮廓采样+自由端贪心封口) / dt:jrt2-pt-inside(+X 射线奇偶) / dt:jrt2-pick-side(中点在区域内的唯一候选=内)，锚段改最长段，链传播不变，歧义/孤立才回退 JRTDW 就近 → **JRT 恒朝内**；出线口颈线(dt:jrt2-neck)改按 FLB 包围盒中心判外(交点沿颈向 5mm 靠近中心=板内→反向) → **FLBJT 恒朝外、不入侵 FLB**；JRTDW 降级为纯位置标记+兜底；②cx v11.2 压线板**卡死真根因**确诊 = dt:cx-yxb-find-wall 的 entnext 全库 while 里，唯一推进 `(setq e (entnext e))` 误嵌在"是壁层直线"的 if 内，库内任一非该层直线实体(文字/块/异层线)令 e 永不到进 → 死循环(与碰撞检测无关，故 v10.7 删碰撞仍卡死；本次用括号探针逐层核实链)；改 dt:layer-vlas 按壁层 foreach(天然有界+提速)；③压线板图样按用户新 1.dxf 重做为干净 D 形(6 件：重合线16.6/上下边11/右边15.3/右端 R4.3 弧×2，删旧碎线×2+中部 R5.75 圆)，**定位点=重合线中点**(白线/源线交界，v10.x 误以起点为基准致整幅偏 8.3)，排布改"中点沿壁 gap 均匀 + 整组居中(两端留白相等)"；斜壁随壁旋转不变。新增 tools\test_direction.py(纯 stdlib 回归：点内判定/封口/颈向/排布复现 1.dxf 图5 三幅坐标/模板闭合) |
-| 批次6 | **jrt v9.23 / cx v11.1** | **低级错误自查修复**：①jrt v9.23 "no function definition: PW" —— v9.22 在 AutoLISP 里误用 let 特殊形式(该语言无 let), 绑定变量 pw 被当函数调用; 改普通 setq + 局部表。注意: 此报错同时证明坑 #73 修复已生效(hook-one 首次被真正调用到)；②cx v11.1 "参数类型错误: stringp #<SUBR>" —— v11.0 进度打印 strcat 参数表混入字面 + 号(python 脚本续行拼接误入生成的 LISP), strcat 收到函数对象即抛此错。教训: **代码生成类修改完成后必须 grep 复核生成物中是否有宿主语言残留符号(+ 号/let 等)** |
-| 批次5 | **jrt v9.22 / cx v11.0 / wx v2.8** | **用户四轮实测**：①jrt v9.22 通用二出线口通道线方向随机根因 = trim-line 保留"距角点远的端点"，定位线反画时把板内段留下(朝内偏移)；改为保留靠**定位线外端**(离外壁交点远的 stub 端点)一侧，与画线方向无关——侵入分流板内部的段一律裁掉(用户定案流程)；②cx v11.0 卡死防御：压线板间距 <10 视为误填按 125 处理 + 每壁 100 幅上限 + 规划/放置阶段打印(卡死可定位阶段)；③wx v2.8 修"精雕图层没移动"根因 = 临时实体在 cur-doc 而 v2.7 只在 tgt 建层，put-layer 层不存在静默失败——两文档都 ensure JD 层；层名"精雕"→"JD"；copyobjects 后目标图 FLB/LS/RZ/DK/JRT/DP/ZJJ 残留并入 JD 并删原层(dt:sz-migrate-layers)；线切割撤销 flatten(本就单层) |
-| 破案+批次4 | **jrt v9.21 / cx v10.9 / wx v2.7** | **坑 #73 破案(工具方法升级)**：①jrt "no function definition: DT:JRT2-HOOK-ONE" 真根因 = v9.17 引入的 dt:jrt-undo-mark 函数体少 1 个右括号, 其 defun 吞掉后续 ch-exist(第二处缺闭合)与 hook-one 等函数的 defun——两处缺口叠加但文件总平衡为 0, check_lisp 字符串匹配全绿漏检; 被吞函数永不定为全局函数。修复程序化(字符计数器算闭合数, 非手数)；②新门禁 tools\check_defun_depth.py: 每个 defun 行首深度必须为 0(豁免 *error* 局部处理器), 全脚本普测通过; ③cx v10.9 修复压线板"二维/三维点 nil"——draw 的 a1 (angle ... n) 第三处 n 撞名(v10.8 漏改), 并把 xfn lambda 改命名函数 dt:cx-yxb-map-pt 显式传参根治闭包风险；④wx v2.7 精雕正反面合并到单一图层"精雕"并逐实体保留原色(ByLayer 转存原图层 ACI 色, dt:sz-flatten-layer), 线切割置入 FLB 同样保色; 每行幅数参数化 ini [排版] per_row(默认 4)；教训: **文件总平衡=0 不代表没有结构错误, defun 深度检查必须独立成门禁** |
-| 修复批次3 | **cx v10.8 / wx v2.6 / jrt v9.20** | **用户三轮实测修复(坑 #72 确立)**：①cx v10.8 压线板"函数错误: LAMBDA"——place 局部计数器 n 与 draw 参数 n 撞名(AutoLISP 大小写不敏感+动态作用域, 外层局部污染内层 lambda 自由变量)，改名 n-old/nrm；②wx v2.6 追加报 numberp nil——v2.5 网格段 grid-col 漏初始化(首幅无文字不进循环所以成功, 追加时 (1+ nil) 抛错)，补 setq grid-col 0；③wx v2.6 盒与内容间恢复 20mm 内边距(用户只要求盒与盒间距统一)，行内锚定/换行补偿 20 保持盒间净距=box_gap；④jrt v9.20 删除 v9.18/v9.19 守卫——defun 只设函数槽不设值槽, (null 函数名) 恒 T 必误报; atoms-family 1 在用户环境不返回函数符号(实证: 文件尾已成功调用的 dt:jrt-cfg-boot 也被报缺失)，两类静态检测均不可靠, c:JRT 恢复直通。教训: **守卫类拦截必须先在目标环境实测检测手段本身** |
-| 修复批次2 | **cx v10.7 / wx v2.5 / jrt v9.19** | **用户二轮实测修复**：①wx v2.5 行内漂移根因=行内追加 x 参照用图纸整体 maxx(命中上一行末尾图形, 行向下堆叠), 改为锚定**当前行文字 bbox 的 maxx + box_gap**；②wx v2.5 包络盒间距统一——盒边距归零(盒=内容精确 bbox), 行/列/盒间距统一为 ini [排版] box_gap=100 单参数(上下左右恒定), 移除 col_gap/row_gap；③wx v2.5 剪贴板分隔符 x → *(用户下料单格式)；④cx v10.7 压线板移除碰撞判断(cands/clash/wall 三函数删除, 用户定案), 改为按 cx_yxb_gap 沿选定侧壁无条件均匀放置; plan/place 两步——删源线前规划(用源线判外侧)/删源线后放置(异常不影响源线清理), 同时根治卡死；⑤jrt v9.19 自检升级 atoms-family 检测并打印缺失函数名单(半加载诊断仍待用户手动 load 输出定位根因) |
-| 修复批量 | **cx v10.6 / wx v2.4 / jrt v9.18 / dt_start v3.2** | **用户实测五问题修复批次**：①cx v10.6 压线板碰撞检测卡死/CPU 飙高——候选 bbox 一次缓存 + 实例包络盒(约20×17mm)预过滤, 每墙 COM 求交从万级降到百级; cx_yxb_gap≤0 跳过(防死循环)；②wx v2.4 排版网格重叠/乱飘——根因为跨文档系统变量(USERI5/USERR5)在非活动目标图上读写不可靠, 弃用改纯几何推导("外协文字"层 MText 为单位标记, 当前行=插入点Y最小的行, 行内<4幅行内追加顶对齐, 满4幅换行 y_top=图纸miny-row_gap)；③wx v2.4 包络盒首幅显示灰/黑——图层色在非活动文档不即时生效(同字体坑), 改实体级 vla-put-color 3 首幅即绿；④jrt v9.18 "no function definition: DT:JRT2-HOOK-ONE"——半加载(用户 DTRELOAD 撞上文件中间态)致模板表新/函数旧混态, 加文件尾加载完整性自检 + c:JRT 入口版本守卫(明确提示关闭重开)；⑤dt_start v3.2 boot/DTRELOAD 逐家族加载验证(主命令缺失即警告)。教训: 手工数 LISP 括号不可靠, 修复全程用 check_lisp 同款字符计数器逐行快照定位 |
-| jrt | **v9.17** | **修复「push-error-using-command 前无法从 *error* 调用(command)」(jrt_runner.lsp v9.17, 2561行, 104 defun; 坑 #69 残留)**：①根因 = dt:jrt2-line-x-curve 解析 dt:cross-points 返回对 (obj . pts) 时误用 cadr——拿到首个交点裸点, foreach 对坐标数字求 distance 抛类型错误, 异常传入 c:JRT 的 *error* 后其 `(command "_.UNDO" "E")` 非法调用并掩盖真错；改为 cdr 取交点列表 + cross-points 加 catch；②本文件 13 处 `(command "_.UNDO" "BE"/"E")` 全部改 COM 撤销标记(dt:jrt-undo-mark/-end, 同 wx v2.2 坑 #69 定案), **全文件实现零 (command) 调用**, *error* 只做 vla-EndUndoMark；用户建议的 command-s 因破坏 2007~2011 兼容未采纳 |
-
+> **本节已拆出 → 见 [`CHANGELOG.md`](CHANGELOG.md)**（v9.0 起的逐版变更与
+> 「批次N」跨脚本修复决策记录；2026-09-16 拆分，内容一字未删）。
+> 日常排查「代码为什么长这样」直接看 §10 已知坑；本节只作索引，避免和 §10 重复承载历史。
 
 ## 10. 已知坑 / 经验教训（v9.x 新增；v1.0~v8.16 的 28 条详见 `offset_runner_v816.lsp` 文件头，核心条目仍有效：纯 COM/求交用 vla-intersectwith/BOM 编码/无默认参数/圆弧端点只读/切点沿曲线/劣弧/vla-offset 继承图层/eName 比较/延长方向指向线外/边遍历边删/括号 stack 校验）
 
@@ -395,6 +322,21 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
      5) **原子级跨文档克隆**：将正面与反面图元**连同幅标题文字**整体平移，使"单元盒"（= 图形 ∪ 文字，外扩 `box_margin`）左下角落到排版点 `(x0, by0)`，组装 Safearray 调用 `(vla-copyobjects cur-doc sa ms-tgt)` 一次性整体深拷贝进入目标文档（**v2.13**：排版间距以单元盒为准，故文字必须先于拷贝生成并量出真实包围盒）；
      6) **清理与收尾**：删除 `cur-doc` 中的临时图元并闭合撤销组；保存目标文档（正上方文件名 MText 已在第 5 步随件拷入，不再事后补写）。
 
+74. **AutoCAD 自己抛的「菜单 Automation 错误」抓不住，而且会打断正在执行的命令**（2026-09-16 用户 AutoCAD 2007 实测，**至今未解决**）：
+   现场：`(c:JRT)` 选「通用二」，打完模板横幅后立即报
+   `Automation 错误。参数 热流道自动化(&R) (位于 Item 中) 无效`（另一次报 `ActiveX 服务器返回错误: 无效索引`），之后**再无任何输出**；而 FLB / CX / JRT「通用一」全部正常。
+   **三个关键特征（下轮排查起点）**：
+   ① 报错文本**点名菜单标题**（`热流道自动化(&R)` 就是自建 popup 的名字）；
+   ② 我们加的**分层诊断一行都没打出来**（`【JRT】① 模板选择框完成/异常`）⇒ 该错误**不是 LISP 异常**，
+      `vl-catch-all-apply` **抓不住**，它是 AutoCAD 在**菜单栏刷新**时抛出并**直接终止当前命令**的；
+   ③ **参数框已实测排除** —— 孤立调用 `(dt:jrt-apply-template 1 T)` + `(dt:jrt-param-dialog)` 完全正常、返回 T。
+   **疑点**：把 popup 用 COM 塞进 ACAD 主菜单组这条兜底路径（`MenuGroups.Add` 在实测的 **2007 与 2024 上都报「未知名称: Add」**，
+   即该兜底在两个版本上都会启用 —— 原文档"2007 老版原生可用"的说法已证伪，见 §2.3 注）。
+   2026-09-16 夜里连试 4 版修法（v3.9 ASCII 名 + Label／v3.10 回退／v3.11 插第 0 位／v3.12 默认不建 COM 菜单），
+   **均未解决且引入更多问题 → 2026-09-17 整体回滚到 v3.6 / v9.36**（这些修法在代码中已不存在，别再按它们推理）。
+   **下轮动手前必须先做最小实验**：在同一台 2007 上分别试「**不建菜单**跑通用二」与「建了菜单但**不开模板框**跑通用二」，
+   先把因果关系钉死，再谈改代码。
+
 ## 11. 接手流程
 
 1. **备份**：改动前把要动的原件 `cp` 到 `HYT-CAD\` 外的临时目录（用完即删）——**勿在 `HYT-CAD\` 内留第二份 .lsp**（坑 #35/#49 多副本误载）。
@@ -402,7 +344,12 @@ APPLOAD dt_start.lsp → DTINSTALL(装完即自启, 本会话立即加载全部�
 3. **版本**：新文件 `*_v<N><M>.lsp`（正式投用版去后缀），版本号写进 文件头/横幅。
 4. **校验**：`python tools\check_lisp.py scripts\<文件名>`（6 个逐一跑：flb/cx/jrt/wx/dt_start/demo，按文件名自动区分清单）；**改到系统变量读取时必跑 `python tools\check_sysvars.py`（坑 #65 nil 泄漏门禁）**；另跑 `python tools\check_defun_depth.py`（defun 顶层深度）+ `python tools\check_layer_colors.py`（图层配色）；回归 `python tools\test_direction.py` + `python tools\check_audit_fixes.py`；深度排查另跑 `python tools\_audit.py`；同名一致性 `python tools\_collide.py`（在 scripts\ 目录下跑）。
 5. **生成编码副本（发版必做）**：`python tools\make_ansi.py` —— 重新生成 `scripts_ansi\` 并自动做逐字节读取器结构校验，车间 2007~2020 老机器部署只认这份副本；
-6. **文档**：用户明确要求时才更新（默认不动）；CAD 侧改动更新 `AGENTS_CAD.md`/`README_CAD.md`（版本号、行数、defun 数、行号、函数清单、版本历史要同步，否则文档会持续失真）。
+6. **文档**：用户明确要求时才更新（默认不动）；CAD 侧改动更新 `AGENTS_CAD.md`/`README_CAD.md`（版本号、行数、defun 数、函数清单要同步，否则文档会持续失真）；版本历史写进 `CHANGELOG.md`（§9 已拆出，**别再记行号**——函数名足矣，行号每改必烂）。
 7. **测试**：让用户 APPLOAD（或 DTRELOAD）后跑 FLB/CX/JRT/FLBSZ（XQG/JD/SJTZ 出图类另测）；几何问题优先要 **截图+DXF(2007)**，用坑 #33 的复算法定位；对话框/加载类疑难用 DTDBG；JRT 通用二出图后另跑 `python tools\check_jrt2_out.py <产物.dxf>`。
-8. **发布**：2026-08-30 起脚本目录即正式目录（`C:\Users\5600\Documents\ZDH\HYT-CAD\`，旧 `test\` 已删除）——在本目录改完、**check_lisp 全绿 + check_sysvars 全过 + 回归/配色/深度门禁全过 + make_ansi 生成成功** + 用户 CAD 实测通过即为发布（2007~2020 用 scripts_ansi\ 副本覆盖后验证）; .dcl/ini 运行时自管, 无需同步动作。
+8. **发布**：脚本目录即正式目录（`C:\Users\5600\Desktop\ZDH\HYT-CAD\`，2026-09-16 实测；旧 `test\` 已删除）——在本目录改完、**check_lisp 全绿 + check_sysvars 全过 + 回归/配色/深度门禁全过 + make_ansi 生成成功** + 用户 CAD 实测通过即为发布（2007~2020 用 scripts_ansi\ 副本覆盖后验证）; .dcl/ini 运行时自管, 无需同步动作。
 9. **低版本验证清单（2007~2015 尤其要跑）**：① APPLOAD 无「输入中的点位置不正确」（编码，坑 #64）② `DTINSTALL` 无「stringp nil」且打印出 ACADVER/支持根/变量可用性（坑 #65）③ 顶栏菜单出现且点击可执行 ④ FLB/CX/JRT 各跑一次 ⑤ 重启 CAD 自动挂载 ⑥ `DTUNINSTALL` 能干净还原。
+10. **打包发老机（要装机时才做）**：**双击仓库根目录 `一键生成移植包.bat`** —— 它会依次跑 `make_ansi.py`（再生 GBK 副本）→ `check_lisp.py`×6（任一不过即中止，不会把坏脚本打进包）→ `deploy_old_pc.py`（打包并逐字节复核），产物在 `deploy\HYT-CAD-老机版\`：
+    6 个 GBK `.lsp` + `wx_runner.ini` + `install.bat` + `使用说明.txt`（一页纸手册）+ `manifest.txt`（名+字节数），并附同名 `.zip`。
+    老机上**双击 `install.bat`** 即完成装机（自动拷贝 → 校验字节数 → 找 `acad.exe` → `acad.exe /b install.scr` 跑 APPLOAD+DTINSTALL）；
+    `install.bat <目录> --check` = 只放文件不碰 CAD。命令行等价写法：`python tools\deploy_old_pc.py`（`--out` / `--no-zip` / `--check`）。
+    > `deploy\` 已入 `.gitignore`（构建产物，可再生，不入库）；`使用说明.txt` 由脚本内置模板生成，**不要再写独立的手册文档**。
