@@ -40,6 +40,14 @@ vla-insertinmenubar vla-removefrommenubar vla-detach vla-get-macro vla-get-files
 vla-get-preferences vla-put-supportpath vla-get-supportpath vla-get-name
 vl-catch-all-apply vl-catch-all-error-p vl-catch-all-error-message vl-propagate
 sqrt expt sin cos atan pi angle distance polar ssget ssname sslength
+ssadd ssdel entget entlast entnext entupd eval read rem set chr
+getpoint getcorner getdist getreal getint getstring getkword initget
+stringp wcmatch vl-cmdf vl-remove-if-not vl-string-translate vl-string-subst
+vl-filename-base vl-filename-mktemp vl-file-copy
+vlax-create-object vlax-release-object vlax-invoke vlax-get vlax-for
+vla-move vla-endundomark vla-startundomark vla-get-color vla-get-document
+vla-get-documents vla-get-insertionpoint vla-get-textstyles
+vla-put-closed cadadr command-s
 tblsearch handent vl-position vl-directory-files vl-filename-directory
 findfile getfiled vl-mkdir vl-file-delete startapp alert load_dialog new_dialog
 start_dialog unload_dialog set_tile get_tile action_tile done_dialog vl-sort
@@ -213,6 +221,61 @@ def lambda_scoped(body):
     return out
 
 
+def collect_calls(tk):
+    """收集"真正的调用头"(用于第 5 项检查)。
+
+    此前把 tk 里每个 '(' 后的首符号一律当调用, 三类结构全部误报:
+      a) defun/lambda 参数表 —— (defun f (p1 / l1) ...) 的 p1 被当成函数;
+      b) quote 引用的数据表 —— '(pts 1 2) / '((0 . LINE) ...) 的表头;
+      c) cond 测试位/大小写 —— (cond (flag ...)) 的 flag、
+         vlax-curve-getClosestPointTo 这类源码大小写混写(AutoLISP 大小写
+         不敏感)。本函数跳过 a/b, 输出统一小写; c 由调用方并入全部
+         已绑定符号后再判。"""
+    calls = set()
+    n = len(tk)
+
+    def skip_group(i):
+        d, j = 1, i + 1
+        while j < n and d:
+            if tk[j] == '(':
+                d += 1
+            elif tk[j] == ')':
+                d -= 1
+            j += 1
+        return j                      # 右括号后一位
+
+    def walk(i, end, quoted):
+        while i < end:
+            t = tk[i]
+            if t == '(':
+                j = skip_group(i)
+                head = tk[i + 1] if i + 1 < end else ''
+                if not quoted:
+                    if head in ('defun', 'lambda'):
+                        k = i + (3 if head == 'defun' else 2)
+                        if k < end and tk[k] == '(':   # 跳过参数表, 只进函数体
+                            walk(skip_group(k), j - 1, False)
+                        else:
+                            walk(i + 1, j - 1, False)
+                    else:
+                        if head and head not in ('(', ')'):
+                            calls.add(head.strip("'").lower())
+                        walk(i + 1, j - 1, False)
+                i = j
+            elif t == "'":
+                if i + 1 < end and tk[i + 1] == '(':   # quoted 数据表: 只走不收
+                    j = skip_group(i + 1)
+                    walk(i + 2, j - 1, True)
+                    i = j
+                else:
+                    i += 2
+            else:
+                i += 1
+
+    walk(0, n, False)
+    return calls
+
+
 def main():
     all_defs, all_sym, raws = {}, {}, {}
     for f in FILES:
@@ -289,18 +352,24 @@ def main():
     print("=" * 78)
     print("5) 调用了但既未定义也非内置的函数")
     print("=" * 78)
-    defined = set()
+    defined, bound = set(), set()
     for f in FILES:
         defined |= set(all_defs[f].keys())
-    known = BUILTINS | defined
+        for n, info in all_defs[f].items():
+            bound |= set(info['params']) | set(info['locals'])
+            bound |= bound_symbols(info['body'])
+    # AutoLISP 大小写不敏感: 统一小写比较(曾把 vlax-curve-getClosestPointTo 误报)
+    known = {b.lower() for b in BUILTINS} | {d.lower() for d in defined}
+    known |= {b.lower() for b in bound}
     calls = set()
     for f in FILES:
         for lineno, txt in split_top_level(strip_comments(raws[f])):
-            tk = tokenize(txt)
-            for k, t in enumerate(tk):
-                if t == '(' and k + 1 < len(tk) and tk[k+1] not in ('lambda',):
-                    calls.add(tk[k+1].strip("'"))
-    miss = sorted(c for c in calls if c not in known and not c.startswith('dt:') and not c.startswith('c:'))
+            calls |= collect_calls(tokenize(txt))
+    miss = sorted(c for c in calls
+                  if c not in known
+                  and not c.startswith('dt:') and not c.startswith('c:')
+                  and not c.startswith('*')                # *全局* 等约定全局
+                  and not re.match(r'^[-\d."]', c))         # 数字/空串/负数字面量
     print("  " + (", ".join(miss) if miss else "无"))
 
 

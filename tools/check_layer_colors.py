@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """图层配色门禁(零依赖): 扫描 scripts/*.lsp 的图层色登记, 断言三条:
 

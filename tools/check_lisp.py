@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """AutoLISP 单文件结构校验门禁(AGENTS.md §2 静态检查)。
 用法: python tools/check_lisp.py <scripts/xxx.lsp> (必须传文件参数)
 检查: BOM / 括号 stack 平衡(处理字符串与 \" 转义) / defun 计数 /

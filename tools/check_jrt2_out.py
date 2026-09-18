@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """JRT 通用二出线口产物回归检查(零依赖, 只读解析 DXF).
 
