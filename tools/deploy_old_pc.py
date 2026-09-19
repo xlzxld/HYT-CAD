@@ -145,6 +145,8 @@ rem ---------- 6. 找 acad.exe 并自动执行安装 ----------
 set "ACAD="
 for /d %%P in ("%ProgramFiles%\Autodesk\AutoCAD*") do if exist "%%~fP\acad.exe" set "ACAD=%%~fP\acad.exe"
 if defined PF86 for /d %%P in ("%PF86%\Autodesk\AutoCAD*") do if exist "%%~fP\acad.exe" set "ACAD=%%~fP\acad.exe"
+rem 精简版常装在自定目录: 各盘符一级目录兜底扫描(浅层, 秒级)
+if not defined ACAD for %%D in (C D E F) do if exist "%%D:\" for /d %%P in ("%%D:\*") do if exist "%%~fP\acad.exe" set "ACAD=%%~fP\acad.exe"
 if not defined ACAD goto :manual
 
 echo.
@@ -155,6 +157,9 @@ echo.
 echo 请看 CAD 命令行的输出, 出现下面这句就算成功:
 echo    【安装】完成: 钩子已写入 acaddoc.lsp(含确定性目录注入), 目录已加入支持/受信任路径。
 echo 然后完全关掉 CAD 再打开, 顶栏应自动出现「热流道自动化(R)」菜单。
+echo.
+echo 注意: 若以前把脚本拷到过其它目录, 开机时命令行还报旧路径的错误,
+echo       是开机钩子还指着旧目录 —— CAD 里运行 DTUNINSTALL 再 DTINSTALL 即可改写。
 goto :done
 
 :manual
@@ -173,11 +178,14 @@ goto :done
 echo.
 echo 安装中断, 请把上面的失败信息发给维护者。
 endlocal
+pause
 exit /b 1
 
 :done
 echo.
+echo 本窗口可以关闭了。
 endlocal
+pause
 exit /b 0
 """
 
