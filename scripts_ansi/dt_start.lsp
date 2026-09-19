@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; dt_start.lsp  v3.16 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.6 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -48,26 +48,6 @@
 ;;;   (T (c:DEMOREC)) 成死代码(坑 #72, jrt v9.20 同款清除)。行为零变化:
 ;;;   本来就每次都走"定位→加载→开录"链路(load 幂等), 只是把恒真条件与
 ;;;   死分支清掉。
-;;; v3.14 : 坑 #75 根治(坑 #74 的最终真凶): v3.13 的 dt:st-filemenu-lines
-;;;   then 分支 `(setq` 少一个右括号, else 分支被吞进 setq 参数表, 末尾多
-;;;   一个 `)` 恰好补平总数 —— 括号计数/深度/审计门禁全查不出, defun 体
-;;;   不被求值所以 2024 加载无恙, 唯独真 2007 的 (load) 报「语法错误」
-;;;   (JRT 选通用二必现)。修复: then 分支补 `)`, 末行去一个 `)`, 结构恢复
-;;;   本意(foreach 3 体元素 + append 在 foreach 外)。新增门禁
-;;;   tools/check_sexpr.py(setq 奇偶/if 元素数/foreach 元素数, 全库扫描
-;;;   防同类暗雷), 已登记 AGENTS.md §2。真机定位靠探针 dt_probe.lsp。
-;;; v3.15 : 菜单挂载多路线级联(真机 2007 实测: MENULOAD 的错误会异步浮现,
-;;;   在下一次 LISP 调用时才冒出"排序函数错误: COMMAND"打断整个挂载):
-;;;   路线 A = COM MenuGroups.Load(错误可捕获, 优先); 路线 B = MENULOAD
-;;;   命令 + 紧跟 menugroup 探测吸收异步错误; **精简机(v<24 且 Add 失败)
-;;;   上两路线全失败时绝不退回 COM popup(坑 #74 炸命令源), 改为提示命令
-;;;   行直接输入** —— 命令可用性永远优先于菜单。
-;;; v3.16 : 真机再实测: 该精简机菜单引擎连"COM Load 成功加载但未挂顶栏的
-;;;   部分菜单"都会在刷新时抛抓不住的错误打断命令(JRT 选通用二即死) ——
-;;;   任何菜单状态都不安全。对策: 精简机(v<24 且 Add 失败)上**不加载任何
-;;;   菜单**(启动时 dt:st-menu-remove 自动 MENUUNLOAD 卸掉已加载的部分
-;;;   菜单), 新增 c:DT 命令面板(DCL list_box 点选执行, 全程不碰菜单引擎)
-;;;   替代顶栏菜单; 保留 DTMENU 供用户自担风险手动试挂文件菜单。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -123,14 +103,12 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.16")   ;; 本文件版本(关于框/横幅用)
-(setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位; v3.13 起文件菜单的 ***MENUGROUP 同名)
+(setq dt:st-version "v3.6")     ;; 本文件版本(关于框/横幅用)
+(setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
 (setq dt:st-popmain nil)      ;; 顶栏主 popup 对象(重挂用)
 (setq *dt-st-mg-add-tried* nil) ;; 会话级: MenuGroups.Add 已试过(2024 被移除, 只提示一次)
-(setq *dt-st-mg-add-ok* nil)  ;; 会话级: v3.13 MenuGroups.Add 本会话是否成功(假=精简版特征, 挂菜单走文件菜单)
-(setq *dt-st-filemenu* nil)   ;; 会话级: v3.13 文件型菜单(MENULOAD)已挂好(ensure 不再重挂)
 
 (setq dt:st-dir nil)          ;; 本目录缓存(会话内)
 (setq *dt-st-loaded* nil)     ;; 会话守卫: 防每开一张图重复加载
@@ -532,174 +510,10 @@
   (alert s)
   (princ))
 
-;; 本机 CAD 版本号(ACADVER 前段数值: 2007=17.0 / 2024=24.3; 取不到=0.0)。
-;; v3.13 挂载路径分流用: MenuGroups.Add 是 2024 才被官方移除的 —— <24 还
-;; 报"未知名称: Add"即精简版(ActiveX 菜单层半残, 坑 #74)。
-(defun dt:st-acadver ( / s)
-  (setq s (dt:st-gets "ACADVER"))
-  (if (= s "") 0.0 (atof s)))
-
-;; 文件型菜单(部分菜单)源文本(v3.13): 与 COM 路径同一张 dt:st-families +
-;; 工具/关于, 结构/热键/宏与 dt:st-menu-build 逐项对应, 两处必须同步改。
-;; 注意: POP1 第一行标签 = 顶栏标题本身(文件菜单格式), 不是下拉里的一项;
-;; 宏尾空格 = 回车(与 COM 宏同一语义); [->]/[<-] 开合子菜单, [--] 分隔线。
-(defun dt:st-filemenu-lines ( / lines fam zh mc pc hk)
-  (setq lines (list ";; 热流道自动化部分菜单(dt_start.lsp 自动生成, 手改会被覆盖)"
-                    ";; 供 MENULOAD 加载; 精简版老 CAD 兜底, 避开 COM 菜单接口(坑 #74)"
-                    ""
-                    "***MENUGROUP=DTTOOLS"
-                    ""
-                    "***POP1"
-                    (strcat "[" dt:st-menutitle "]")))
-  (foreach fam dt:st-families
-    (setq zh (cadr fam) mc (caddr fam) pc (cadddr fam) hk (nth 4 fam))
-    (setq lines (append lines (list (strcat "[->" zh "(&" hk ")]"))))
-    (if pc
-      (setq lines (append lines
-        (list (strcat "[画" zh "(&D)]^C^C(c:" mc ") ")
-              (strcat "[" zh "参数(&P)]^C^C(c:" pc ") ")
-              "[<-]")))
-      (setq lines (append lines
-        (list (strcat "[测量加热条长度(&C)]^C^C(c:JRTSZ) ")
-              (strcat "[测量分流板(&F)]^C^C(c:" mc ") ")
-              "[数据图纸(&D)]^C^C(c:SJTZ) "
-              "[线切割(&W)]^C^C(c:XQG) "
-              "[精雕(&J)]^C^C(c:JD) "
-              "[<-]")))))
-  (append lines
-    (list "[--]"
-          "[->工具(&T)]"
-          "[重载脚本(&R)]^C^C(c:DTRELOAD) "
-          "[诊断(&G)]^C^C(c:DTDBG) "
-          "[安装自启(&I)]^C^C(c:DTINSTALL) "
-          "[卸载工具箱(&U)]^C^C(c:DTUNINSTALL) "
-          "[打开脚本目录(&O)]^C^C(dt:st-open-dir) "
-          "[演示记录器(&M)]^C^C(c:DTDEMO) "
-          "[<-]"
-          "[--]"
-          "[关于(&A)...]^C^C(dt:st-about) ")))
-
-;; 文件型菜单挂载(v3.13, 全程不碰 ActiveX 菜单接口): 写 dt_tools.mns →
-;; MENULOAD 加载 → menucmd 把 POP1 追加进顶栏。成功 T。
-;; 关键点:
-;;   - 已挂好本会话直接 T(部分菜单跨文档持久, 重复 append 会顶栏出两份);
-;;   - 菜单组已加载(上次会话的 MENULOAD 状态被 CAD 记住)时跳过加载只补挂;
-;;   - MENULOAD 是文件型命令, 须 FILEDIA=0 才吃命令行文件名(AfraLISP 定式),
-;;     用完立即恢复 FILEDIA/CMDECHO;
-;;   - 追加位置 P<n>: n=顶栏项数+1 起试, 失败退 P<n>/P9, 每次试完回读顶栏
-;;     确认真的挂上(只读 COM, 不写菜单接口)。
-(defun dt:st-menu-fileload ( / dir path f fd cm r1 r2 r n mb cnt i nm found)
-  (cond
-    (*dt-st-filemenu* T)
-    (T
-     (setq dir (if (and dt:st-dir (/= dt:st-dir "")) dt:st-dir (getenv "TEMP")))
-     (if dir
-       (progn
-         (setq path (strcat dir "\\dt_tools.mns")
-               f (open path "w"))
-         (if f
-           (progn
-             (vl-catch-all-apply
-               '(lambda ( / ln) (foreach ln (dt:st-filemenu-lines) (write-line ln f)))
-               nil)
-             (close f)
-             (if (null (menugroup dt:st-menugroup))
-               (progn
-                 ;; 路线 A: COM MenuGroups.Load(错误可正常捕获, 优先)
-                 (setq r (vl-catch-all-apply
-                           '(lambda ( )
-                              (vla-load (vla-get-menugroups
-                                          (vlax-get-acad-object))
-                                        path))
-                           nil))
-                 (if (vl-catch-all-error-p r)
-                   (princ (strcat "\n【菜单】COM Load 失败: "
-                                  (vl-catch-all-error-message r))))
-                 ;; 路线 B: MENULOAD 命令(老精简版上错误可能异步浮现:
-                 ;;   command 调用本身不抛, 错误在下一次 LISP 调用时才冒出
-                 ;;   —— 紧跟一次 menugroup 探测把异步错误吸进 catch)
-                 (if (null (menugroup dt:st-menugroup))
-                   (progn
-                     (setq fd (atoi (dt:st-gets "FILEDIA"))
-                           cm (atoi (dt:st-gets "CMDECHO")))
-                     (if (/= fd 0) (setq fd 1))
-                     (if (/= cm 0) (setq cm 1))
-                     (setvar "FILEDIA" 0)
-                     (setvar "CMDECHO" 0)
-                     (setq r1 (vl-catch-all-apply
-                                'command (list "_.MENULOAD" path)))
-                     (setq r2 (vl-catch-all-apply
-                                'menugroup (list dt:st-menugroup)))
-                     (if (= fd 1) (setvar "FILEDIA" 1))
-                     (if (= cm 1) (setvar "CMDECHO" 1))
-                     (if (vl-catch-all-error-p r2)
-                       (princ (strcat "\n【菜单】MENULOAD 失败(异步): "
-                                      (vl-catch-all-error-message r2)))
-                       (if (vl-catch-all-error-p r1)
-                         (princ (strcat "\n【菜单】MENULOAD 失败: "
-                                        (vl-catch-all-error-message r1))))))))))
-           (princ "\n【菜单】菜单文件写入失败(磁盘权限?), 改走 COM 菜单。"))
-         ;; 加载成功(或上次会话遗留已加载) → 回读顶栏, 没有才追加
-         (if (menugroup dt:st-menugroup)
-           (progn
-             (setq mb (vl-catch-all-apply
-                        '(lambda ( ) (vla-get-menubar (vlax-get-acad-object)))
-                        nil)
-                   cnt (cond ((vl-catch-all-error-p mb) 9)
-                             ((null mb) 9)
-                             (T (vl-catch-all-apply 'vla-get-count (list mb)))))
-             (if (vl-catch-all-error-p cnt) (setq cnt 9))
-             (cond
-               ;; 顶栏读不了(极端精简版): 无法核验, 视为已就位, 不再折腾
-               ((or (vl-catch-all-error-p mb) (null mb))
-                (setq *dt-st-filemenu* T)
-                (princ "\n【菜单】部分菜单已加载(顶栏状态不可读), 如未见菜单请 DTRELOAD。"))
-               (T
-                (setq i 0 found nil)
-                (while (and (null found) (< i cnt))
-                  (setq nm (vl-catch-all-apply 'vla-get-name
-                             (list (vla-item mb i)))
-                        i (1+ i))
-                  (if (and (not (vl-catch-all-error-p nm))
-                           (= (strcase nm) (strcase dt:st-menutitle)))
-                    (setq found T)))
-                (if found
-                  (progn
-                    (setq *dt-st-filemenu* T)
-                    (princ "\n【菜单】顶栏菜单已存在(上次会话保留), 直接复用。"))
-                  (progn
-                    ;; 追加位置依次试: 顶栏末尾后一格 → 末格 → 第 9 格(经典默认位)
-                    (foreach n (list (1+ cnt) cnt 9)
-                      (if (null found)
-                        (progn
-                          (vl-catch-all-apply
-                            'menucmd
-                            (list (strcat "P" (itoa n) "=+"
-                                          dt:st-menugroup ".POP1")))
-                          (setq i 0)
-                          (while (and (null found) (< i cnt))
-                            (setq nm (vl-catch-all-apply 'vla-get-name
-                                       (list (vla-item mb i)))
-                                  i (1+ i))
-                            (if (and (not (vl-catch-all-error-p nm))
-                                     (= (strcase nm) (strcase dt:st-menutitle)))
-                              (setq found T))))))
-                    (if found
-                      (progn
-                        (setq *dt-st-filemenu* T)
-                        (princ "\n【菜单】已用文件菜单(MENULOAD)挂出顶栏(避开 COM 菜单接口)。"))
-                      (princ "\n【菜单】部分菜单已加载但未能挂上顶栏, 改走 COM 菜单重试。"))))))
-             *dt-st-filemenu*)
-           nil))
-       (progn
-         (princ "\n【菜单】未定位到脚本目录, 无法写菜单文件。")
-         nil)))))
-
-;; 摘除菜单(幂等, 三路都清): 1) 自建 DTTOOLS 组 → 组内 popup 移出菜单栏 +
-;; Detach 整组; 2) 备用路径塞在 ACAD 组里的同名顶栏 popup → 移出 + Delete;
-;; 3) v3.13 文件型部分菜单(MENULOAD 加载的 DTTOOLS 组) → MENUUNLOAD 卸载。
+;; 摘除菜单(幂等, 双路径都清): 1) 自建 DTTOOLS 组 → 组内 popup 移出菜单栏 +
+;; Detach 整组; 2) 备用路径塞在 ACAD 组里的同名顶栏 popup → 移出 + Delete。
 ;; 全部 catch 静默 —— 组不存在/重复调用都不报错
-(defun dt:st-menu-remove ( / mgs mg pops i fd cm)
+(defun dt:st-menu-remove ( / mgs mg pops i)
   (vl-load-com)
   (setq mgs (vla-get-menugroups (vlax-get-acad-object)))
   ;; 1) 自建 DTTOOLS 组
@@ -725,15 +539,14 @@
            (progn
              (vl-catch-all-apply 'vla-removefrommenubar (list pp))
              (vl-catch-all-apply 'vla-delete (list pp)))))))
-  ;; 3) v3.13 文件型部分菜单(精简版兜底): 已加载则 MENUUNLOAD 卸载
+  ;; 一次性清理(坑 #74 修复期间残留): 误用 MENUUNLOAD/COM Load 装入的
+  ;; 部分菜单组 DTTOOLS —— 它在精简版菜单引擎下会在刷新时打断命令,
+  ;; 必须卸载回滚到用户原始可用状态。
   (if (menugroup dt:st-menugroup)
     (progn
-      (setq fd (dt:st-gets "FILEDIA") cm (dt:st-gets "CMDECHO"))
-      (if (/= fd "0") (setvar "FILEDIA" 0))
+      (setvar "FILEDIA" 0)
       (vl-catch-all-apply 'command (list "_.MENUUNLOAD" dt:st-menugroup))
-      (if (/= fd "0") (setvar "FILEDIA" (if (= fd "") 1 (atoi fd))))
-      (if (/= cm "0") (setvar "CMDECHO" (if (= cm "") 1 (atoi cm))))))
-  (setq *dt-st-filemenu* nil)
+      (setvar "FILEDIA" (if (= (dt:st-gets "FILEDIA") "") 1 (atoi (dt:st-gets "FILEDIA"))))))
   (princ))
 
 ;; 菜单宏构造(v2.5): 真控制字符 chr 3(^C, 两个=取消两极) + LISP 表达式
@@ -766,18 +579,6 @@
   (cond
     ((or (null mg) (vl-catch-all-error-p mg))
      (princ "\n【菜单】ACAD 主菜单组定位失败, 菜单跳过(脚本命令仍可用)。")
-     nil)
-    ;; v3.15: 精简版路径 —— MenuGroups.Add 本会话失败且版本 < 24 →
-    ;; 优先 MENULOAD 文件菜单; **失败时绝不退回 COM popup**(坑 #74 炸命
-    ;; 令源), 改为提示命令行直接输入 —— 命令可用性永远优先于菜单。
-    ((and (< (dt:st-acadver) 24.0)
-          (null *dt-st-mg-add-ok*))
-     ;; v3.16: 真机实测该机菜单引擎连"已加载未挂顶栏的部分菜单"都会在刷新
-     ;; 时抛抓不住的错误打断命令(JRT 选通用二即死) —— 任何菜单状态都不安全。
-     ;; 对策: 不加载任何菜单 + 卸掉已加载的部分菜单; 用 c:DT 命令面板替代。
-     (dt:st-menu-remove)
-     (princ "\n【菜单】本机菜单引擎不可用(精简版), 已停用顶部菜单以免打断命令。")
-     (princ "\n【菜单】命令面板: 输入 DT 回车点选; 或命令行直接输入: JRT / FLB / CX / FLBSZ / JRTSZ / XQG / JD / SJTZ。")
      nil)
     (T
      (setq pops (vla-get-menus mg))
@@ -842,16 +643,11 @@
                       "(若顶栏已显示菜单则为正常)。")))
      T)))
 
-;; 幂等挂菜单(boot/DTRELOAD 调用): 文件型菜单已挂好则不动(MENULOAD 的部分
-;; 菜单跨文档持久, 重挂反而重复); COM 型已建成则只重挂到菜单栏(工作区切换
-;; 挤掉后找回); 未建成才走完整构建。失败只提示, 不影响脚本。
+;; 幂等挂菜单(boot/DTRELOAD 调用): 本会话已建成则只重挂到菜单栏(工作区切换
+;; 挤掉后找回), 未建成才走完整构建。失败只提示, 不影响脚本。
 (defun dt:st-menu-ensure ( / r)
-  (cond
-    (*dt-st-filemenu*
-     ;; v3.13: 文件型菜单(MENULOAD)跨文档持久, 无需重挂
-     (princ))
-    (*dt-st-menu-done*
-     (progn
+  (if *dt-st-menu-done*
+    (progn
       (setq r (vl-catch-all-apply
                 'vla-insertinmenubar
                 (list dt:st-popmain
@@ -859,8 +655,8 @@
                                    (vla-get-menubar (vlax-get-acad-object))))))))
       (if (vl-catch-all-error-p r)
         (princ (strcat "\n【菜单】重挂返回: " (vl-catch-all-error-message r)
-                       "(顶栏已有菜单则为正常)")))))
-    (T
+                       "(顶栏已有菜单则为正常)"))))
+    (progn
       (setq r (vl-catch-all-apply 'dt:st-menu-build nil))
       (cond
         ((vl-catch-all-error-p r)
@@ -871,80 +667,6 @@
 ;; ---------------------------------------------------------------------------
 ;; 命令
 ;; ---------------------------------------------------------------------------
-;; ---------------------------------------------------------------------------
-;; 命令面板(v3.16): 精简版老 CAD 的菜单引擎半残, 顶栏菜单不可用 ——
-;; 改用 DCL list_box 点选执行, 全程不碰菜单引擎, 全版本安全。
-;; ---------------------------------------------------------------------------
-(setq dt:st-launch-cmds
-      (list (cons "画分流板 (FLB)" "FLB")
-            (cons "加热条-通用一/通用二 (JRT)" "JRT")
-            (cons "画出线槽 (CX)" "CX")
-            (cons "测量分流板 (FLBSZ)" "FLBSZ")
-            (cons "测量加热条长度 (JRTSZ)" "JRTSZ")
-            (cons "线切割出图 (XQG)" "XQG")
-            (cons "精雕出图 (JD)" "JD")
-            (cons "数据图纸 (SJTZ)" "SJTZ")
-            (cons "重载脚本 (DTRELOAD)" "DTRELOAD")
-            (cons "诊断 (DTDBG)" "DTDBG")))
-
-(defun dt:st-launch-dcl (path / f ln)
-  (setq f (open path "w"))
-  (if f
-    (progn
-      (foreach ln (list "dt_launch : dialog {"
-                        "  label = \"热流道自动化 命令面板\";"
-                        "  : list_box { key = \"cmds\"; height = 12; width = 36; }"
-                        "  : row { ok_button; cancel_button; }"
-                        "}")
-        (write-line ln f))
-      (close f)
-      T)
-    nil))
-
-(defun c:DT ( / path dcl-id r idx cmd c)
-  (setq path (strcat (if (and *dt-script-dir* (/= *dt-script-dir* ""))
-                       *dt-script-dir*
-                       (getenv "TEMP"))
-                     "\\dt_launch.dcl"))
-  (if (dt:st-launch-dcl path)
-    (progn
-      (setq dcl-id (vl-catch-all-apply 'load_dialog (list path)))
-      (if (or (vl-catch-all-error-p dcl-id) (null dcl-id))
-        (princ "\n【面板】对话框加载失败。")
-        (progn
-          (if (new_dialog "dt_launch" dcl-id)
-            (progn
-              (start_list "cmds")
-              (foreach c dt:st-launch-cmds (add_list (car c)))
-              (end_list)
-              (setq idx "0")
-              (action_tile "cmds" "(setq idx $value)")
-              (action_tile "accept" "(done_dialog 1)")
-              (action_tile "cancel" "(done_dialog 0)")
-              (setq r (vl-catch-all-apply 'start_dialog nil))
-              (unload_dialog dcl-id)
-              (if (and (not (vl-catch-all-error-p r)) (= r 1))
-                (progn
-                  (setq cmd (cdr (nth (atoi idx) dt:st-launch-cmds)))
-                  (princ (strcat "\n【面板】执行 " cmd " ..."))
-                  (vl-catch-all-apply
-                    '(lambda ( ) (apply (read (strcat "c:" cmd)) nil))
-                    nil)
-                  (princ))))
-            (progn
-              (unload_dialog dcl-id)
-              (princ "\n【面板】对话框初始化失败。"))))))
-    (princ "\n【面板】对话框文件写入失败。"))
-  (princ))
-
-;; 手动试挂文件菜单(自担风险): 若此后出现命令被打断, 重启 CAD 并不再运行本命令
-(defun c:DTMENU ( / r)
-  (setq r (dt:st-menu-fileload))
-  (if r
-    (princ "\n【菜单】文件菜单已挂出; 若出现命令被打断, 请重启 CAD 并不要再运行 DTMENU。")
-    (princ "\n【菜单】文件菜单挂载失败。"))
-  (princ))
-
 (defun c:DTINSTALL ( / dir ok root fb p)
   (setq dir (dt:st-locate))
   (cond
@@ -1011,11 +733,6 @@
                      "**本版本无此变量(getvar 返回 nil)**"))))
   (princ (strcat "\n[0z] acaddoc.lsp 落点 = "
                  (vl-prin1-to-string (dt:st-acadoc-path (dt:st-locate)))))
-  ;; 0z-m) 菜单链路探测(v3.13, 坑 #74): 版本号 + 挂载路径 + 部分菜单加载状态
-  (princ (strcat "\n[0z] 菜单: 版本号=" (rtos (dt:st-acadver) 2 1)
-                 "  MenuGroups.Add=" (if *dt-st-mg-add-ok* "成功(真版)" "未成功/未试")
-                 "  文件菜单=" (vl-prin1-to-string *dt-st-filemenu*)
-                 "  部分菜单组=" (if (menugroup dt:st-menugroup) "已加载" "未加载")))
   ;; 0a) 目录注入状态(核心: 各脚本 find-dcl 依赖 *dt-script-dir*)
   (princ (strcat "\n[0a] *dt-script-dir*=" (vl-prin1-to-string *dt-script-dir*)
                  "  dt:st-dir=" (vl-prin1-to-string dt:st-dir)))
