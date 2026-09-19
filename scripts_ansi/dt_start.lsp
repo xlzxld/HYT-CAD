@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; dt_start.lsp  v3.14 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.15 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -56,6 +56,12 @@
 ;;;   本意(foreach 3 体元素 + append 在 foreach 外)。新增门禁
 ;;;   tools/check_sexpr.py(setq 奇偶/if 元素数/foreach 元素数, 全库扫描
 ;;;   防同类暗雷), 已登记 AGENTS.md §2。真机定位靠探针 dt_probe.lsp。
+;;; v3.15 : 菜单挂载多路线级联(真机 2007 实测: MENULOAD 的错误会异步浮现,
+;;;   在下一次 LISP 调用时才冒出"排序函数错误: COMMAND"打断整个挂载):
+;;;   路线 A = COM MenuGroups.Load(错误可捕获, 优先); 路线 B = MENULOAD
+;;;   命令 + 紧跟 menugroup 探测吸收异步错误; **精简机(v<24 且 Add 失败)
+;;;   上两路线全失败时绝不退回 COM popup(坑 #74 炸命令源), 改为提示命令
+;;;   行直接输入** —— 命令可用性永远优先于菜单。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -111,7 +117,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.14")   ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.15")   ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位; v3.13 起文件菜单的 ***MENUGROUP 同名)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -576,7 +582,7 @@
 ;;     用完立即恢复 FILEDIA/CMDECHO;
 ;;   - 追加位置 P<n>: n=顶栏项数+1 起试, 失败退 P<n>/P9, 每次试完回读顶栏
 ;;     确认真的挂上(只读 COM, 不写菜单接口)。
-(defun dt:st-menu-fileload ( / dir path f fd cm r n mb cnt i nm found)
+(defun dt:st-menu-fileload ( / dir path f fd cm r1 r2 r n mb cnt i nm found)
   (cond
     (*dt-st-filemenu* T)
     (T
@@ -593,18 +599,39 @@
              (close f)
              (if (null (menugroup dt:st-menugroup))
                (progn
-                 (setq fd (atoi (dt:st-gets "FILEDIA"))
-                       cm (atoi (dt:st-gets "CMDECHO")))
-                 (if (/= fd 0) (setq fd 1))
-                 (if (/= cm 0) (setq cm 1))
-                 (setvar "FILEDIA" 0)
-                 (setvar "CMDECHO" 0)
-                 (setq r (vl-catch-all-apply 'command (list "_.MENULOAD" path)))
-                 (if (= fd 1) (setvar "FILEDIA" 1))
-                 (if (= cm 1) (setvar "CMDECHO" 1))
+                 ;; 路线 A: COM MenuGroups.Load(错误可正常捕获, 优先)
+                 (setq r (vl-catch-all-apply
+                           '(lambda ( )
+                              (vla-load (vla-get-menugroups
+                                          (vlax-get-acad-object))
+                                        path))
+                           nil))
                  (if (vl-catch-all-error-p r)
-                   (princ (strcat "\n【菜单】MENULOAD 加载失败: "
-                                  (vl-catch-all-error-message r)))))))
+                   (princ (strcat "\n【菜单】COM Load 失败: "
+                                  (vl-catch-all-error-message r))))
+                 ;; 路线 B: MENULOAD 命令(老精简版上错误可能异步浮现:
+                 ;;   command 调用本身不抛, 错误在下一次 LISP 调用时才冒出
+                 ;;   —— 紧跟一次 menugroup 探测把异步错误吸进 catch)
+                 (if (null (menugroup dt:st-menugroup))
+                   (progn
+                     (setq fd (atoi (dt:st-gets "FILEDIA"))
+                           cm (atoi (dt:st-gets "CMDECHO")))
+                     (if (/= fd 0) (setq fd 1))
+                     (if (/= cm 0) (setq cm 1))
+                     (setvar "FILEDIA" 0)
+                     (setvar "CMDECHO" 0)
+                     (setq r1 (vl-catch-all-apply
+                                'command (list "_.MENULOAD" path)))
+                     (setq r2 (vl-catch-all-apply
+                                'menugroup (list dt:st-menugroup)))
+                     (if (= fd 1) (setvar "FILEDIA" 1))
+                     (if (= cm 1) (setvar "CMDECHO" 1))
+                     (if (vl-catch-all-error-p r2)
+                       (princ (strcat "\n【菜单】MENULOAD 失败(异步): "
+                                      (vl-catch-all-error-message r2)))
+                       (if (vl-catch-all-error-p r1)
+                         (princ (strcat "\n【菜单】MENULOAD 失败: "
+                                        (vl-catch-all-error-message r1))))))))))
            (princ "\n【菜单】菜单文件写入失败(磁盘权限?), 改走 COM 菜单。"))
          ;; 加载成功(或上次会话遗留已加载) → 回读顶栏, 没有才追加
          (if (menugroup dt:st-menugroup)
@@ -734,14 +761,19 @@
     ((or (null mg) (vl-catch-all-error-p mg))
      (princ "\n【菜单】ACAD 主菜单组定位失败, 菜单跳过(脚本命令仍可用)。")
      nil)
-    ;; v3.13: MenuGroups.Add 本会话失败且版本 < 24 → 精简版特征(真版 2021+
-    ;; 才移除 Add), COM 菜单接口半残会在菜单栏刷新时炸命令(坑 #74) →
-    ;; 优先走 MENULOAD 文件菜单; 失败再落回 COM popup(最坏 = v3.6 行为)。
+    ;; v3.15: 精简版路径 —— MenuGroups.Add 本会话失败且版本 < 24 →
+    ;; 优先 MENULOAD 文件菜单; **失败时绝不退回 COM popup**(坑 #74 炸命
+    ;; 令源), 改为提示命令行直接输入 —— 命令可用性永远优先于菜单。
     ((and (< (dt:st-acadver) 24.0)
-          (null *dt-st-mg-add-ok*)
-          (dt:st-menu-fileload))
-     (setq *dt-st-menu-done* T)
-     T)
+          (null *dt-st-mg-add-ok*))
+     (if (dt:st-menu-fileload)
+       (progn (setq *dt-st-menu-done* T)
+              (setq *dt-st-filemenu* T)
+              T)
+       (progn
+         (princ "\n【菜单】本机菜单引擎不可用(MENULOAD/COM Load 均失败), 顶部菜单跳过。")
+         (princ "\n【菜单】所有命令仍可用, 请直接命令行输入: JRT / FLB / CX / FLBSZ / JRTSZ / XQG / JD / SJTZ。")
+         nil)))
     (T
      (setq pops (vla-get-menus mg))
      ;; 同名 popup 已存在(上次删除被拒的残留)→ 复用; 不存在 → 新建并填内容
