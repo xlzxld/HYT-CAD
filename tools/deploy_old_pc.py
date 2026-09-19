@@ -88,8 +88,9 @@ set "SRC=%~dp0"
 set "PF86=%ProgramFiles(x86)%"
 set "DST=%~1"
 set "MODE="
-if /i "%~1"=="--check" (set "DST=%SystemDrive%\HYTCAD" & set "MODE=check")
-if "%DST%"=="" set "DST=%SystemDrive%\HYTCAD"
+rem 默认安装到老电脑桌面 ZDH\\HYT-CAD(用户要求; 用 USERPROFILE 拼接兼容任意用户名)
+if /i "%~1"=="--check" (set "DST=%USERPROFILE%\Desktop\ZDH\HYT-CAD" & set "MODE=check")
+if "%DST%"=="" set "DST=%USERPROFILE%\Desktop\ZDH\HYT-CAD"
 if /i "%~2"=="--check" set "MODE=check"
 
 echo ================================================
