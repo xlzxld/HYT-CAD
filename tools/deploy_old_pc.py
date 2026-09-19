@@ -104,15 +104,19 @@ rem ---------- 1. 建立目标目录 ----------
 if not exist "%DST%" mkdir "%DST%"
 if not exist "%DST%" (echo [失败] 无法创建目录 %DST% & goto :fail)
 
-rem ---------- 2. 复制 6 个 GBK 脚本 ----------
+rem ---------- 2. 复制 6 个 GBK 脚本(源=目标时跳过复制) ----------
+set "SAME="
+if /i "%DST%\"=="%SRC%" set "SAME=T"
 set /a N=0
 for %%F in (dt_start.lsp flb_runner.lsp cx_runner.lsp jrt_runner.lsp wx_runner.lsp demo_recorder.lsp) do (
   if not exist "%SRC%%%F" (echo [失败] 源文件缺失: %%F & goto :fail)
-  copy /y "%SRC%%%F" "%DST%\%%F" >nul
-  if errorlevel 1 (echo [失败] 复制失败: %%F & goto :fail)
+  if not defined SAME (
+    copy /y "%SRC%%%F" "%DST%\%%F" >nul
+    if errorlevel 1 (echo [失败] 复制失败: %%F & goto :fail)
+  )
   set /a N+=1
 )
-echo [1/4] 已复制 !N! 个 .lsp 到 %DST%
+if defined SAME (echo [1/4] 源=目标, 6 个脚本已就位, 跳过复制) else (echo [1/4] 已复制 !N! 个 .lsp 到 %DST%)
 
 rem ---------- 3. 字节数校验(防 U 盘拷贝不完整) ----------
 set /a BAD=0
