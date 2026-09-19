@@ -8,6 +8,7 @@
 
 | 脚本 | 版本 | 变更 |
 |---|---|---|
+| dt_start | **v3.13** | **坑 #74 根治: 精简版老 CAD 上 COM 菜单炸命令(JRT 通用二必现)**。根因: 用户 2007 实测 MenuGroups.Add 报"未知名称: Add"—— 真 2007 有该方法, 报错即**精简版**, ActiveX 菜单层半残; 塞进 ACAD 组的 COM popup 在每次菜单栏刷新(弹框关闭必触发)时被校验抛出抓不住的 Automation 错误, 当场打断正在执行的命令(报错文本点名"热流道自动化(&R)"正是该 popup)。对策: ①新增 `dt:st-menu-fileload` —— 写 `dt_tools.mns`(内容与 COM 路径同源 dt:st-families) → `MENULOAD` 加载(FILEDIA/CMDECHO 保护) → `menucmd "Pn=+DTTOOLS.POP1"` 挂顶栏(位置依次试 顶栏数+1/顶栏数/9, 每次只读 COM 回读确认), **全程不碰 ActiveX 菜单接口**; ②挂载路径分流: MenuGroups.Add 失败且 ACADVER<24(真 2021+ 才移除 Add, <24 还失败=精简版特征)→文件菜单, 其余走原 COM 路径行为零变化, 文件菜单失败再退回 COM popup(最坏=v3.6 行为); ③`dt:st-menu-remove` 三路清理(+MENUUNLOAD); ④`dt:st-menu-ensure` 文件菜单不重挂(部分菜单跨文档持久); ⑤新增 `dt:st-acadver`, DTDBG 增 [0z] 菜单链路探测行(版本号/Add 成败/文件菜单/菜单组加载状态); ⑥`_audit.py` BUILTINS 补 menugroup/menucmd 等内置名。行数 814→985, defun 31→34 |
 | offset | v9.0 | 出线槽拆分为独立 slot_runner；删 6 死函数+去重重构+精简注释（整理自 v8.16，逻辑零变化） |
 | offset | v9.1 | 封口线收尾并层(FBX→FLB、JTFBX→JT 并删层)；"分流板挖孔"全部更名"分流板假体" |
 | offset | v9.2 | 新增热咀圆(参数 nozzle_offset 40/nozzle_r 11.35，定位=封口线中点向内) |

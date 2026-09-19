@@ -52,6 +52,7 @@ tblsearch handent vl-position vl-directory-files vl-filename-directory
 findfile getfiled vl-mkdir vl-file-delete startapp alert load_dialog new_dialog
 start_dialog unload_dialog set_tile get_tile action_tile done_dialog vl-sort
 getenv numberp listp equal eq logior type atom boundp
+menugroup menucmd vla-copyobjects vla-open vla-save vla-close vla-put-fullname
 1+ 1- + - * / = /= < > <= >= T nil
 """.split())
 
