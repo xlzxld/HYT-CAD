@@ -1,5 +1,14 @@
 ;;; ============================================================================
 ;;; 程序名 : 加热条自动绘制工具 (jrt_runner.lsp)  v9.36
+;;; v9.37 : 真 2007 专修(坑 #74 终局): c:JRT 原流程"模板框→参数框"两连开,
+;;;          模板框关闭瞬间在用户精简版 2007 上触发菜单 Automation 错误风暴
+;;;          打断命令(仅通用二必现; 直连 (dt:jrt2-process) 两次全部出图正常,
+;;;          几何本体无任何问题)。修复: 模板单选合并进参数对话框(单开一个
+;;;          DCL, 非当前模板的参数置灰), c:JRT 不再打开模板选择框 ——
+;;;          对话框链路只剩参数框一次开关(该形态已在用户机实测安全)。
+;;;          模板记忆不变(mem [模板] template=下标, 下次打开自动选中)。
+;;;          dt:jrt-template-dialog / dt:jrt-template-dcl-lines 删除。
+;;;
 ;;; v9.36  : 通用二封闭线改「本体在 JRT + JRTFBX 定位副本」(用户定案):
 ;;;          v9.34 曾把通用二破口封闭线整体挪到 "JRTFBX", 破坏"JRT = 完整
 ;;;          加热条"契约 —— 外协加工按图层白名单取线, 漏掉 JRTFBX 就致出图
@@ -277,7 +286,7 @@
 (vl-load-com)  ; 加载 Visual LISP 扩展, 使 vla-* 系列函数可用
 
 ;; 版本单一来源: 发版时与头注同行更新; 加载横幅引用本值(防两处手抄脱节)
-(setq *dt-jrt-ver* "v9.36")
+(setq *dt-jrt-ver* "v9.37")
 
 ;; 坑 #69(v9.17): 撤销组统一走 COM 标记 —— *error* 与普通代码都不再碰
 ;; (command); 无开放标记时 EndUndoMark 无副作用, 双重 catch 兜底
@@ -2815,7 +2824,7 @@
 ;; 内置 DCL 源文本(外部 jrt_runner.dcl 不存在时自动生成, 总是覆盖保证同步)
 ;; 参数框 edit_box 按当前模板的参数键动态生成(两个一行; 通用一 6 项/通用二 8 项)
 (defun dt:jrt-dcl-lines ( / keys lines row k1 k2)
-  (setq keys (dt:jrt-tpl-keys) lines nil)
+  (setq keys (mapcar 'car dt:jrt-param-table) lines nil)
   (while keys
     (setq k1 (car keys)
           k2 (cadr keys)
@@ -2835,7 +2844,11 @@
     (list
       "jrt_param : dialog {"
       "  label = \"加热条参数设置\";"
-      "  : text { key = \"tpl_name\"; label = \"当前模板\"; width = 40; }"
+      "  : boxed_radio_column {"
+      "    label = \"模板\";"
+      "    : radio_button { key = \"tpl0\"; label = \"通用一 (LD源线偏移, 无出线口)\"; }"
+      "    : radio_button { key = \"tpl1\"; label = \"通用二 (JRT外壁整圈+JRTDW出线口)\"; }"
+      "  }"
       "  : boxed_column {"
       "    label = \"加热条参数\";")
     lines
@@ -2848,27 +2861,6 @@
       "    cancel_button;"
       "  }"
       "}")))
-
-;; 模板选择框 DCL 源文本(v9.8, 由注册表动态生成 radio_button 列表)
-(defun dt:jrt-template-dcl-lines ( / lines i tpl)
-  (setq lines (list "jrt_template_select : dialog {"
-                    "  label = \"选择加热条模板\";"
-                    "  : boxed_radio_column {"
-                    "    label = \"模板\";")
-        i 0)
-  (foreach tpl dt:jrt-template-table
-    (setq lines (append lines
-      (list (strcat "    : radio_button { key = \"tpl" (itoa i)
-                    "\"; label = \"" (nth 0 tpl) " — " (nth 1 tpl) "\"; }")))
-          i (1+ i)))
-  (append lines
-    (list "  }"
-          "  : row {"
-          "    spacer; ok_button; cancel_button;"
-          "  }"
-          "}")))
-
-;; 把内置 DCL 源文本写入文件 path(参数框 + 模板选择框两个对话框)
 (defun dt:jrt-write-dcl (path / f ln)
   (setq f (open path "w"))
   (if f
@@ -2876,7 +2868,7 @@
       ;; v9.14: 写中途异常也保证 close(半截 dcl 由对话框链的 catch 提示)
       (vl-catch-all-apply
         '(lambda ( )
-           (foreach ln (append (dt:jrt-dcl-lines) (list "") (dt:jrt-template-dcl-lines))
+           (foreach ln (dt:jrt-dcl-lines)
              (write-line ln f)))
         nil)
       (close f)
@@ -2916,6 +2908,7 @@
 ;; 只读当前模板的键, 其余参数保持不变);
 ;; v9.12: 应用后自动保存记忆(取消不触发本回调, 天然"确定才记忆")
 (defun dt:jrt-param-apply ( / p v)
+  (setq *jrt-template* *jrt-tpl-pick*)   ; v9.37: 面板单选即当前模板
   (foreach p dt:jrt-param-table
     (if (member (car p) (dt:jrt-tpl-keys))
       (progn
@@ -2929,6 +2922,7 @@
 ;; 返回: T=用户点"确定"(参数已应用到全局变量), nil=取消/加载失败
 (defun dt:jrt-param-dialog ( / dcl-file dcl-id result p)
   (setq *jrt-cfg* (dt:jrt-cfg-read (strcat (dt:jrt-cfg-dir) "\\jrt_runner.ini")))
+  (setq *jrt-tpl-pick* *jrt-template*)
   (setq dcl-file (dt:jrt-find-dcl))
   (if (null dcl-file)
     (progn
@@ -2940,16 +2934,21 @@
       (setq dcl-id (vl-catch-all-apply 'load_dialog (list dcl-file)))
       (if (or (vl-catch-all-error-p dcl-id) (null dcl-id))
         (progn
-          (princ "\n【界面】对话框文件加载失败。")
+          (princ "\n【界面】对话框加载失败。")
           nil)
         (progn
           (if (new_dialog "jrt_param" dcl-id)
             (progn
-              (set_tile "tpl_name"
-                        (strcat "当前模板: " (nth 0 (dt:jrt-template-row))))
+              (set_tile (strcat "tpl" (itoa *jrt-tpl-pick*)) "1")
+              (action_tile "tpl0" "(dt:jrt-tpl-switch 0)")
+              (action_tile "tpl1" "(dt:jrt-tpl-switch 1)")
               (foreach p dt:jrt-param-table
-                (if (member (car p) (dt:jrt-tpl-keys))
-                  (set_tile (car p) (rtos (eval (cadr p)) 2 2))))
+                (set_tile (car p)
+                  (rtos (if (member (car p) (dt:jrt-tpl-keys))
+                          (eval (cadr p))
+                          (dt:jrt-param-default (car p)))
+                        2 2)))
+              (dt:jrt-tpl-mode *jrt-tpl-pick*)
               (action_tile "reset" "(dt:jrt-param-reset)")
               (action_tile "accept" "(dt:jrt-param-apply)(done_dialog 1)")
               (action_tile "cancel" "(done_dialog 0)")
@@ -2961,9 +2960,22 @@
               (princ "\n【界面】对话框初始化失败。")
               nil)))))))
 
-;; 采用指定模板: 设当前下标并把参数写入全局变量;
-;; v9.12 值来源优先级: 该模板记忆值 → ini 配置节 → 模板内置默认表 → 表 caddr
-;; quiet=T 静默(加载时恢复用), nil 打印(模板框切换用)
+;; v9.37: 面板内切换模板 —— 单选更新 + 非当前模板的独有参数置灰
+(defun dt:jrt-tpl-mode (i / k)
+  (foreach k (list "jrt_offset" "jrt_cap_inset" "jrt_fillet_r" "jrt_cap_r")
+    (mode_tile k (if (= i 0) 0 1)))
+  (foreach k (list "jrt2_neck_len" "jrt2_neck_off" "jrt2_close_r" "jrt2_trim_r"
+                   "jrt2_half_w" "jrt2_end_r" "jrt2_hook_ext")
+    (mode_tile k (if (= i 1) 0 1)))
+  (princ))
+
+(defun dt:jrt-tpl-switch (i)
+  (setq *jrt-tpl-pick* i)
+  (set_tile "tpl0" (if (= i 0) "1" "0"))
+  (set_tile "tpl1" (if (= i 1) "1" "0"))
+  (dt:jrt-tpl-mode i)
+  (princ))
+
 (defun dt:jrt-apply-template (idx quiet / tpl params p v)
   (setq *jrt-template* idx
         tpl (nth idx dt:jrt-template-table)
@@ -2980,45 +2992,6 @@
 
 ;; 独立模板选择框(v9.8): 单选模板 → 确定=采用该模板, 取消=nil(中止流程)
 ;; v9.12: 打开前重读 ini 配置(改配置后切模板立即用新默认)
-(defun dt:jrt-template-dialog ( / dcl-file dcl-id result idx tpl)
-  (setq *jrt-cfg* (dt:jrt-cfg-read (strcat (dt:jrt-cfg-dir) "\\jrt_runner.ini")))
-  (setq dcl-file (dt:jrt-find-dcl))
-  (if (null dcl-file)
-    (progn
-      (princ "\n【模板】无法生成对话框文件(磁盘权限不足?), 界面不可用。")
-      nil)
-    (progn
-      ;; v9.14: load_dialog 对损坏 dcl 是抛错而非返回 nil, 包 catch
-      (setq dcl-id (vl-catch-all-apply 'load_dialog (list dcl-file)))
-      (if (or (vl-catch-all-error-p dcl-id) (null dcl-id))
-        (progn
-          (princ "\n【模板】对话框文件加载失败。")
-          nil)
-        (progn
-          (if (new_dialog "jrt_template_select" dcl-id)
-            (progn
-              ;; 预选当前模板; 单选回调记录到 *jrt-tpl-pick*
-              (setq *jrt-tpl-pick* *jrt-template*)
-              (set_tile (strcat "tpl" (itoa *jrt-template*)) "1")
-              (setq idx 0)
-              (foreach tpl dt:jrt-template-table
-                (action_tile (strcat "tpl" (itoa idx))
-                             (strcat "(setq *jrt-tpl-pick* " (itoa idx) ")"))
-                (setq idx (1+ idx)))
-              (action_tile "accept" "(done_dialog 1)")
-              (action_tile "cancel" "(done_dialog 0)")
-              (setq result (vl-catch-all-apply 'start_dialog nil))
-              (unload_dialog dcl-id)
-              (if (and (not (vl-catch-all-error-p result)) (= result 1))
-                (progn (dt:jrt-apply-template *jrt-tpl-pick* nil) T)
-                nil))
-            (progn
-              (unload_dialog dcl-id)
-              (princ "\n【模板】对话框初始化失败。")
-              nil)))))))
-
-;; 命令 JRTPARAM: 弹出参数设置对话框(只修改参数, 不执行);
-;; 汇总按当前模板的参数键输出(v9.9 动态)
 (defun c:JRTPARAM ( / p txt)
   (if (dt:jrt-param-dialog)
     (progn
@@ -3046,11 +3019,9 @@
 
   ;; v9.20: 移除 v9.18 的入口守卫 —— defun 只设函数槽不设值槽,
   ;; (null 函数名) 恒为 T, 该守卫对完整加载也恒误报(坑 #72), 已删。
-  (if (null (dt:jrt-template-dialog))
-    (princ "\n已取消(未选模板), 未执行加热条绘制。")
-    (if (null (dt:jrt-param-dialog))
-      (princ "\n已取消, 未执行加热条绘制。")
-      (if (setq proc (cdr (assoc 'process (nth 3 (dt:jrt-template-row)))))
+  (if (null (dt:jrt-param-dialog))
+    (princ "\n已取消, 未执行加热条绘制。")
+    (if (setq proc (cdr (assoc 'process (nth 3 (dt:jrt-template-row)))))
         ;; 模板自管主流程(当前为 "通用二", v9.9 引入): 源图层检查/清理旧产物/偏移/
         ;; 封口/统计全部在覆盖函数内完成, 不走下方内置 LD 流程
         (apply proc nil)
@@ -3108,7 +3079,6 @@
         )
       )
     )
-      )
     )
   )
   (princ)  ; 静默退出, 不打印返回结果
