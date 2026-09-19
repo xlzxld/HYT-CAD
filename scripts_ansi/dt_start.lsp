@@ -1,5 +1,5 @@
 ;;; ============================================================================
-;;; dt_start.lsp  v3.13 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.14 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -48,6 +48,14 @@
 ;;;   (T (c:DEMOREC)) 成死代码(坑 #72, jrt v9.20 同款清除)。行为零变化:
 ;;;   本来就每次都走"定位→加载→开录"链路(load 幂等), 只是把恒真条件与
 ;;;   死分支清掉。
+;;; v3.14 : 坑 #75 根治(坑 #74 的最终真凶): v3.13 的 dt:st-filemenu-lines
+;;;   then 分支 `(setq` 少一个右括号, else 分支被吞进 setq 参数表, 末尾多
+;;;   一个 `)` 恰好补平总数 —— 括号计数/深度/审计门禁全查不出, defun 体
+;;;   不被求值所以 2024 加载无恙, 唯独真 2007 的 (load) 报「语法错误」
+;;;   (JRT 选通用二必现)。修复: then 分支补 `)`, 末行去一个 `)`, 结构恢复
+;;;   本意(foreach 3 体元素 + append 在 foreach 外)。新增门禁
+;;;   tools/check_sexpr.py(setq 奇偶/if 元素数/foreach 元素数, 全库扫描
+;;;   防同类暗雷), 已登记 AGENTS.md §2。真机定位靠探针 dt_probe.lsp。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -103,7 +111,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.13")   ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.14")   ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位; v3.13 起文件菜单的 ***MENUGROUP 同名)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -538,7 +546,7 @@
       (setq lines (append lines
         (list (strcat "[画" zh "(&D)]^C^C(c:" mc ") ")
               (strcat "[" zh "参数(&P)]^C^C(c:" pc ") ")
-              "[<-]"))
+              "[<-]")))
       (setq lines (append lines
         (list (strcat "[测量加热条长度(&C)]^C^C(c:JRTSZ) ")
               (strcat "[测量分流板(&F)]^C^C(c:" mc ") ")
@@ -557,7 +565,7 @@
           "[演示记录器(&M)]^C^C(c:DTDEMO) "
           "[<-]"
           "[--]"
-          "[关于(&A)...]^C^C(dt:st-about) "))))
+          "[关于(&A)...]^C^C(dt:st-about) ")))
 
 ;; 文件型菜单挂载(v3.13, 全程不碰 ActiveX 菜单接口): 写 dt_tools.mns →
 ;; MENULOAD 加载 → menucmd 把 POP1 追加进顶栏。成功 T。
@@ -655,7 +663,8 @@
          nil)))))
 
 ;; 摘除菜单(幂等, 三路都清): 1) 自建 DTTOOLS 组 → 组内 popup 移出菜单栏 +
-;; Detach 整组; 2) 备用路径塞在 ACAD 组里的同名顶栏 popup → 移出 + Delete。
+;; Detach 整组; 2) 备用路径塞在 ACAD 组里的同名顶栏 popup → 移出 + Delete;
+;; 3) v3.13 文件型部分菜单(MENULOAD 加载的 DTTOOLS 组) → MENUUNLOAD 卸载。
 ;; 全部 catch 静默 —— 组不存在/重复调用都不报错
 (defun dt:st-menu-remove ( / mgs mg pops i fd cm)
   (vl-load-com)
