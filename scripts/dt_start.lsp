@@ -1,5 +1,5 @@
 ﻿;;; ============================================================================
-;;; dt_start.lsp  v3.15 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
+;;; dt_start.lsp  v3.16 —— 一键加载 / 自启动引导器 + 顶部菜单(名字固定, 不带版本号)
 ;;; 用途: 与 flb_runner / cx_runner / jrt_runner / wx_runner / demo_recorder 脚本同目录,
 ;;;       APPLOAD 本文件一次 → 输 DTINSTALL → 以后开 CAD 自动全部就位。
 ;;; 命令:
@@ -62,6 +62,12 @@
 ;;;   命令 + 紧跟 menugroup 探测吸收异步错误; **精简机(v<24 且 Add 失败)
 ;;;   上两路线全失败时绝不退回 COM popup(坑 #74 炸命令源), 改为提示命令
 ;;;   行直接输入** —— 命令可用性永远优先于菜单。
+;;; v3.16 : 真机再实测: 该精简机菜单引擎连"COM Load 成功加载但未挂顶栏的
+;;;   部分菜单"都会在刷新时抛抓不住的错误打断命令(JRT 选通用二即死) ——
+;;;   任何菜单状态都不安全。对策: 精简机(v<24 且 Add 失败)上**不加载任何
+;;;   菜单**(启动时 dt:st-menu-remove 自动 MENUUNLOAD 卸掉已加载的部分
+;;;   菜单), 新增 c:DT 命令面板(DCL list_box 点选执行, 全程不碰菜单引擎)
+;;;   替代顶栏菜单; 保留 DTMENU 供用户自担风险手动试挂文件菜单。
 ;;; 版本规则: 正式版文件名无版本后缀(flb_runner.lsp 等)时**优先加载**;
 ;;;           无正式版才取"v+数字"最大的开发版。换版本只需替换文件。
 ;;; v2.1 要点(顶部菜单):
@@ -117,7 +123,7 @@
             (list "cx_runner" "出线槽" "CX" "CXPARAM" "C")
             (list "wx_runner" "外协加工" "FLBSZ" nil "W")))
 
-(setq dt:st-version "v3.15")   ;; 本文件版本(关于框/横幅用)
+(setq dt:st-version "v3.16")   ;; 本文件版本(关于框/横幅用)
 (setq dt:st-menugroup "DTTOOLS")          ;; 菜单组名(卸载/重挂按名定位; v3.13 起文件菜单的 ***MENUGROUP 同名)
 (setq dt:st-menutitle "热流道自动化(&R)") ;; 顶栏标题(热键 Alt+R, R 未被内置菜单占用)
 (setq *dt-st-menu-done* nil)  ;; 会话级: 菜单本会话已完整建成(重挂走捷径)
@@ -766,14 +772,13 @@
     ;; 令源), 改为提示命令行直接输入 —— 命令可用性永远优先于菜单。
     ((and (< (dt:st-acadver) 24.0)
           (null *dt-st-mg-add-ok*))
-     (if (dt:st-menu-fileload)
-       (progn (setq *dt-st-menu-done* T)
-              (setq *dt-st-filemenu* T)
-              T)
-       (progn
-         (princ "\n【菜单】本机菜单引擎不可用(MENULOAD/COM Load 均失败), 顶部菜单跳过。")
-         (princ "\n【菜单】所有命令仍可用, 请直接命令行输入: JRT / FLB / CX / FLBSZ / JRTSZ / XQG / JD / SJTZ。")
-         nil)))
+     ;; v3.16: 真机实测该机菜单引擎连"已加载未挂顶栏的部分菜单"都会在刷新
+     ;; 时抛抓不住的错误打断命令(JRT 选通用二即死) —— 任何菜单状态都不安全。
+     ;; 对策: 不加载任何菜单 + 卸掉已加载的部分菜单; 用 c:DT 命令面板替代。
+     (dt:st-menu-remove)
+     (princ "\n【菜单】本机菜单引擎不可用(精简版), 已停用顶部菜单以免打断命令。")
+     (princ "\n【菜单】命令面板: 输入 DT 回车点选; 或命令行直接输入: JRT / FLB / CX / FLBSZ / JRTSZ / XQG / JD / SJTZ。")
+     nil)
     (T
      (setq pops (vla-get-menus mg))
      ;; 同名 popup 已存在(上次删除被拒的残留)→ 复用; 不存在 → 新建并填内容
@@ -866,6 +871,80 @@
 ;; ---------------------------------------------------------------------------
 ;; 命令
 ;; ---------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
+;; 命令面板(v3.16): 精简版老 CAD 的菜单引擎半残, 顶栏菜单不可用 ——
+;; 改用 DCL list_box 点选执行, 全程不碰菜单引擎, 全版本安全。
+;; ---------------------------------------------------------------------------
+(setq dt:st-launch-cmds
+      (list (cons "画分流板 (FLB)" "FLB")
+            (cons "加热条-通用一/通用二 (JRT)" "JRT")
+            (cons "画出线槽 (CX)" "CX")
+            (cons "测量分流板 (FLBSZ)" "FLBSZ")
+            (cons "测量加热条长度 (JRTSZ)" "JRTSZ")
+            (cons "线切割出图 (XQG)" "XQG")
+            (cons "精雕出图 (JD)" "JD")
+            (cons "数据图纸 (SJTZ)" "SJTZ")
+            (cons "重载脚本 (DTRELOAD)" "DTRELOAD")
+            (cons "诊断 (DTDBG)" "DTDBG")))
+
+(defun dt:st-launch-dcl (path / f ln)
+  (setq f (open path "w"))
+  (if f
+    (progn
+      (foreach ln (list "dt_launch : dialog {"
+                        "  label = \"热流道自动化 命令面板\";"
+                        "  : list_box { key = \"cmds\"; height = 12; width = 36; }"
+                        "  : row { ok_button; cancel_button; }"
+                        "}")
+        (write-line ln f))
+      (close f)
+      T)
+    nil))
+
+(defun c:DT ( / path dcl-id r idx cmd c)
+  (setq path (strcat (if (and *dt-script-dir* (/= *dt-script-dir* ""))
+                       *dt-script-dir*
+                       (getenv "TEMP"))
+                     "\\dt_launch.dcl"))
+  (if (dt:st-launch-dcl path)
+    (progn
+      (setq dcl-id (vl-catch-all-apply 'load_dialog (list path)))
+      (if (or (vl-catch-all-error-p dcl-id) (null dcl-id))
+        (princ "\n【面板】对话框加载失败。")
+        (progn
+          (if (new_dialog "dt_launch" dcl-id)
+            (progn
+              (start_list "cmds")
+              (foreach c dt:st-launch-cmds (add_list (car c)))
+              (end_list)
+              (setq idx "0")
+              (action_tile "cmds" "(setq idx $value)")
+              (action_tile "accept" "(done_dialog 1)")
+              (action_tile "cancel" "(done_dialog 0)")
+              (setq r (vl-catch-all-apply 'start_dialog nil))
+              (unload_dialog dcl-id)
+              (if (and (not (vl-catch-all-error-p r)) (= r 1))
+                (progn
+                  (setq cmd (cdr (nth (atoi idx) dt:st-launch-cmds)))
+                  (princ (strcat "\n【面板】执行 " cmd " ..."))
+                  (vl-catch-all-apply
+                    '(lambda ( ) (apply (read (strcat "c:" cmd)) nil))
+                    nil)
+                  (princ))))
+            (progn
+              (unload_dialog dcl-id)
+              (princ "\n【面板】对话框初始化失败。"))))))
+    (princ "\n【面板】对话框文件写入失败。"))
+  (princ))
+
+;; 手动试挂文件菜单(自担风险): 若此后出现命令被打断, 重启 CAD 并不再运行本命令
+(defun c:DTMENU ( / r)
+  (setq r (dt:st-menu-fileload))
+  (if r
+    (princ "\n【菜单】文件菜单已挂出; 若出现命令被打断, 请重启 CAD 并不要再运行 DTMENU。")
+    (princ "\n【菜单】文件菜单挂载失败。"))
+  (princ))
+
 (defun c:DTINSTALL ( / dir ok root fb p)
   (setq dir (dt:st-locate))
   (cond
