@@ -32,42 +32,120 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 提交信息规范：只有存在本地钩子配置且装了依赖时才校验。
-      # 没配就明确跳过（不会让 CI 误判为失败）。
-      # SHA 走 env 传递（不内插进 script）；首推/强推时 base 可能为全零 SHA，
-      # 此时无有效区间可比对，跳过校验而不是报难排查的错误。
-      - name: 提交信息规范 (commitlint)
-        if: ${{ hashFiles('.pre-commit-config.yaml', 'commitlint.config.js') != '' }}
-        env:
-          CL_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          CL_HEAD: ${{ github.sha }}
+      # 提交信息规范：只认 commitlint.config.js（tsc 只给 Node/JS 项目部署它）。
+      # 纯 Python 等非 Node 项目没有这个文件 → 本步明确跳过，绝不因此安装 npm。
+      - name: 提交信息规范 (commitlint, 仅 Node 项目)
+        if: ${{ hashFiles('commitlint.config.js') != '' }}
         run: |
           npm i -D @commitlint/cli@21.2.2 @commitlint/config-conventional@21.2.2
-          if [ -z "$CL_BASE" ] || echo "$CL_BASE" | grep -qE '^0+$'; then
-            echo "无有效 base SHA（首推/强推），跳过 commitlint 区间校验"
-            exit 0
-          fi
-          npx --no -- @commitlint/cli --from "$CL_BASE" --to "$CL_HEAD" --verbose
+          npx --no -- @commitlint/cli --from "${{ github.event.pull_request.base.sha || github.event.before }}" --to "${{ github.sha }}" --verbose
 
-      # 聚合门禁：读 .agents/project.py（唯一命令源），逐条执行。
+      # 结构门禁：AI 生成代码的括号平衡/语法/缩进/调用形态五层检查（全仓）。
+      # 检查器是 tsc-managed 落盘件 .agents/structure_guard.py（含 bracket_lint.py），
+      # 随 tsc install / sync 自动更新——CI 够不着技能目录，所以它必须躺在项目里。
+      # --strict：截断 / 降级 / 未知语言一律拦下（没真正查完 != 通过）；
+      # --allow-missing-tools：runner 缺 node / PyYAML 等工具时显式放行该类降级。
+      # 本层 fail-closed：退出码 1（代码问题）或 2（工具故障/检查不完整）都拦下。
+      - name: 结构门禁 (structure_guard, 全仓)
+        run: python3 .agents/structure_guard.py --strict --allow-missing-tools --quiet --color never .
+
+      # 聚合门禁：读 .agents/project.py（唯一命令源），逐条执行（每条带超时）。
       # 内联实现而不是调 .agents/tsc.py——执行逻辑常驻技能目录、不进项目，
       # CI runner 上没有技能目录，也不该为此引入对私有技能仓库的 token 依赖。
       - name: 聚合门禁 (fmt-check / lint / test / build)
         run: |
           python3 - <<'PYEOF'
-          import subprocess, sys
+          import os, re, shutil, signal, subprocess, sys
           from pathlib import Path
+
+          # 控制台编码不一定是能编码中文的代码页（英文版 Windows runner 是 cp1252，
+          # 且输出重定向到管道时取的是区域代码页而不是 UTF-8）。本壳的提示语全是中文，
+          # 不强制 UTF-8 就会在第一条 print 上抛 UnicodeEncodeError 崩掉、退出码变成 1——
+          # 与本地 tsc.py 的判定直接漂移（CI 在 windows 上实测撞到过）。
+          # 本地 tsc.py 早就有这层兜底，两套壳必须一致。
+          for _stream in (sys.stdout, sys.stderr):
+              try:
+                  _stream.reconfigure(encoding="utf-8", errors="replace")
+              except (AttributeError, ValueError):
+                  pass
 
           cfg = Path(".agents/project.py")
           if not cfg.is_file():
               print("找不到 .agents/project.py，门禁无法执行", file=sys.stderr)
               sys.exit(3)
-          ns = {"__file__": str(cfg.resolve())}
-          exec(compile(cfg.read_text(encoding="utf-8"), str(cfg), "exec"), ns)
+
+          # 配置加载：AST 安全解析（与本地 tsc.py parse_project_config 同源）。
+          # 绝不 exec——CI 决不执行仓库里任何文件夹带的代码；只认白名单常量
+          # （FMT/LINT/TEST/BUILD_CMD 与 GATE_TIMEOUTS），import / 函数调用 /
+          # 属性访问 / 变量引用一律按非法配置退出 3。
+          CFG_KEYS = {"FMT_CHECK_CMD", "LINT_CMD", "TEST_CMD", "BUILD_CMD", "GATE_TIMEOUTS"}
+          import ast as _ast
+          def const_value(node, where):
+              if isinstance(node, _ast.Constant):
+                  v = node.value
+                  if v is None or isinstance(v, (str, int, float, bool)):
+                      return v, None
+                  return None, "%s：不支持的常量类型" % where
+              if isinstance(node, _ast.Dict):
+                  out = {}
+                  for k, val in zip(node.keys, node.values):
+                      if not (isinstance(k, _ast.Constant) and isinstance(k.value, str)):
+                          return None, "%s：字典键必须是字符串字面量" % where
+                      item, err = const_value(val, where)
+                      if err:
+                          return None, err
+                      out[k.value] = item
+                  return out, None
+              if isinstance(node, (_ast.List, _ast.Tuple)):
+                  out = []
+                  for el in node.elts:
+                      item, err = const_value(el, where)
+                      if err:
+                          return None, err
+                      out.append(item)
+                  return out, None
+              if isinstance(node, _ast.Call):
+                  return None, "%s：禁止函数调用" % where
+              if isinstance(node, _ast.Attribute):
+                  return None, "%s：禁止属性访问" % where
+              if isinstance(node, _ast.Name):
+                  return None, "%s：禁止变量引用（只允许字面量）" % where
+              return None, "%s：禁止表达式 %s" % (where, type(node).__name__)
+          try:
+              tree = _ast.parse(cfg.read_text(encoding="utf-8"), filename=str(cfg))
+          except (SyntaxError, ValueError) as e:
+              print(".agents/project.py 语法无法解析：%s" % e, file=sys.stderr)
+              sys.exit(3)
+          ns = {}
+          for node in tree.body:
+              where = "project.py 第 %d 行" % getattr(node, "lineno", 0)
+              if isinstance(node, _ast.Expr) and isinstance(node.value, _ast.Constant):
+                  continue  # 模块 docstring
+              if isinstance(node, (_ast.Import, _ast.ImportFrom)):
+                  print("%s：project.py 禁止 import（配置只允许白名单常量，绝不执行）" % where,
+                        file=sys.stderr)
+                  sys.exit(3)
+              if isinstance(node, _ast.Assign):
+                  value, err = const_value(node.value, where)
+                  if err:
+                      print(".agents/project.py 无法通过 AST 白名单解析：%s" % err, file=sys.stderr)
+                      sys.exit(3)
+                  for t in node.targets:
+                      if isinstance(t, _ast.Name) and t.id in CFG_KEYS:
+                          ns[t.id] = value
+                  continue
+              print("%s：不允许的语句 %s（只允许简单赋值）" % (where, type(node).__name__),
+                    file=sys.stderr)
+              sys.exit(3)
 
           # 同源校验：AGENTS.md §2 与 .agents/project.py 必须一致。
           # 判定逻辑与本地 `tsc.py check-config` 同源（两套执行壳，一个命令源）。
-          ROW_TO_KEY = {"格式化": "FMT_CHECK_CMD", "静态检查": "LINT_CMD", "测试": "TEST_CMD", "构建": "BUILD_CMD"}
+          ROW_TO_KEY = {
+              "格式化": "FMT_CHECK_CMD", "Format": "FMT_CHECK_CMD", "format": "FMT_CHECK_CMD",
+              "静态检查": "LINT_CMD", "Lint": "LINT_CMD", "lint": "LINT_CMD",
+              "测试": "TEST_CMD", "Test": "TEST_CMD", "test": "TEST_CMD",
+              "构建": "BUILD_CMD", "Build": "BUILD_CMD", "build": "BUILD_CMD",
+          }
           def split_row(line):
               text = line.strip()
               if text.startswith("|"):
@@ -124,8 +202,11 @@ jobs:
                   if cells[0].startswith(prefix) and key not in table:
                       table[key] = cells[1]
           if any("[自动填充]" in v for v in table.values()):
-              # §2 尚未适配（项目还没填）：跳过同源校验，让"零门禁 rc=3"给出更可行动的信号
-              print("§2 仍是 [自动填充] 占位（项目未适配），跳过同源校验")
+              # §2 尚未适配（项目还没填）：按"未配置不是通过"判 rc=1（与本地
+              # tsc.py check-config 同口径——check-config 绿必须意味着真同源）
+              print("§2 仍是 [自动填充] 占位（项目未适配）：同源校验不通过。"
+                    "先按 BOOTSTRAP 填充 §2 与 .agents/project.py。", file=sys.stderr)
+              sys.exit(1)
           else:
               mismatch = []
               for key in ("FMT_CHECK_CMD", "LINT_CMD", "TEST_CMD", "BUILD_CMD"):
@@ -140,21 +221,83 @@ jobs:
                   sys.exit(1)
               print("同源校验：AGENTS.md §2 与 .agents/project.py 一致")
 
+          DEFAULT_TIMEOUT_S = 600
           steps = [
               ("格式化 (Format)", "FMT_CHECK_CMD"),
               ("静态检查 (Lint)", "LINT_CMD"),
               ("测试 (Test)", "TEST_CMD"),
               ("构建 (Build)", "BUILD_CMD"),
           ]
+          per_step = ns.get("GATE_TIMEOUTS") or {}
+
+          # 解释器回退：命令源里的 python / python3 / py 若在本 runner 上解析不到，
+          # 换成当前解释器。与本地 tsc.py 的 retarget_interpreter 同口径——
+          # 命令源必须是两处一致的静态字符串，所以只能在执行壳里兜这一层。
+          INTERP_HEAD = re.compile(
+              r'^(?P<indent>\s*)(?P<quote>"?)(?P<token>(?:py|python[0-9.]*)(?:\.exe)?)(?P=quote)(?=\s|$)',
+              re.IGNORECASE,
+          )
+          def retarget(cmd):
+              m = INTERP_HEAD.match(cmd or "")
+              if m is None or shutil.which(m.group("token")):
+                  return cmd
+              print(f"注意：解释器 {m.group('token')} 不在 PATH，已改用 {sys.executable}")
+              return '%s"%s"%s' % (m.group("indent"), sys.executable, cmd[m.end():])
+
           ran = 0
           for label, key in steps:
-              command = ns.get(key)
-              if command in (None, "", "skip"):
+              raw_command = ns.get(key)
+              if raw_command in (None, "", "skip"):
                   print(f"skip: {label}（未配置）")
                   continue
+              # 与本地 tsc.py verify 同口径（最终审查 F-01）：AST 白名单允许 list/int 等
+              # 常量值，不设防会在正则匹配处裸崩，破坏退出码契约
+              if not isinstance(raw_command, str):
+                  print(f"{key} 的值必须是字符串或 None，当前是 {type(raw_command).__name__}"
+                        "——请修正 .agents/project.py。门禁结论：配置非法（退出码 3）",
+                        file=sys.stderr)
+                  sys.exit(3)
+              command = retarget(raw_command)
+              raw_timeout = per_step.get(key) or DEFAULT_TIMEOUT_S
+              try:
+                  timeout_s = max(1, int(raw_timeout))
+              except (TypeError, ValueError):
+                  print(f'GATE_TIMEOUTS["{key}"] 的超时值 {raw_timeout!r} 无法解释为秒数'
+                        "——请修正 .agents/project.py。门禁结论：配置非法（退出码 3）",
+                        file=sys.stderr)
+                  sys.exit(3)
+              print(f"$ {command}（超时 {timeout_s}s）")
+              kwargs = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+              proc = subprocess.Popen(command, shell=True, cwd=".", **kwargs)
+              try:
+                  proc.communicate(timeout=timeout_s)
+                  code = proc.returncode
+              except subprocess.TimeoutExpired:
+                  if os.name == "nt":
+                      # 只杀 shell 不够：孙进程会继续持有调用方的 stdout/stderr 管道，
+                      # 反而让上层一直等到它自然退出；taskkill /T 按父子关系杀整棵树。
+                      try:
+                          subprocess.run(
+                              ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=15,
+                          )
+                      except (OSError, subprocess.SubprocessError):
+                          pass  # taskkill 缺失/超时——下面的单进程终止仍会执行
+                  else:
+                      try:
+                          os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                      except (ProcessLookupError, PermissionError, OSError):
+                          pass
+                  if proc.poll() is None:
+                      proc.kill()
+                  print(f"{label} 超过 {timeout_s}s 未结束，已终止整个进程组。门禁结论：超时（退出码 124）",
+                        file=sys.stderr)
+                  sys.exit(124)
+              if code is not None and code < 0:
+                  print(f"{label} 被信号杀死（信号 {-code}），按执行错误处理。", file=sys.stderr)
+                  code = 2
               ran += 1
-              print(f"$ {command}")
-              code = subprocess.run(command, shell=True).returncode
               print(f"  退出码：{code}")
               if code != 0:
                   print(f"{label} 未通过，停在此处。门禁结论：失败（退出码 {code}）")
